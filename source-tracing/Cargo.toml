@@ -1,0 +1,26 @@
+[package]
+name = "source-tracing"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Paquet autonome (hors workspace de l'engine) : il réutilise l'engine par chemins.
+[workspace]
+
+[[bin]]
+name = "source-tracing"
+path = "src/main.rs"
+
+[dependencies]
+engine-core = { path = "../engine/core" }
+engine-app = { path = "../engine/app" }
+adapter-polymarket = { path = "../engine/adapters/polymarket" }
+# D4 : seule dépendance directe nouvelle (déjà dans engine/Cargo.lock)
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "time", "sync", "macros", "signal"] }
+
+[profile.release]
+codegen-units = 1
+lto = true

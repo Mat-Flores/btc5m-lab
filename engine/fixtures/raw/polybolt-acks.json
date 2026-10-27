@@ -1,0 +1,19 @@
+[
+ {
+  "op": "subscribed",
+  "channel": "price.polymarket",
+  "rid": "s1"
+ },
+ {
+  "op": "error",
+  "channel": "price.crypto",
+  "rid": "s1",
+  "code": "auth_required"
+ },
+ {
+  "op": "error",
+  "channel": "price.crypto.twap",
+  "rid": "s1",
+  "code": "auth_required"
+ }
+]

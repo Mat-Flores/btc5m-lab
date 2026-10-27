@@ -1,0 +1,38 @@
+[
+ {
+  "connection_id": "gd9keO9j_WeIKEhKhA==",
+  "payload": {
+   "full_accuracy_value": "80985877815741550000000",
+   "symbol": "btc/usd",
+   "timestamp": 1792359572000,
+   "value": 80985.87781574155
+  },
+  "timestamp": 1792359573157,
+  "topic": "crypto_prices_chainlink",
+  "type": "update"
+ },
+ {
+  "connection_id": "gd9keO9j_WeIKEhKhA==",
+  "payload": {
+   "full_accuracy_value": "80985934515097020000000",
+   "symbol": "btc/usd",
+   "timestamp": 1792359573000,
+   "value": 80985.93451509702
+  },
+  "timestamp": 1792359573796,
+  "topic": "crypto_prices_chainlink",
+  "type": "update"
+ },
+ {
+  "connection_id": "gd9keO9j_WeIKEhKhA==",
+  "payload": {
+   "full_accuracy_value": "80985896222187670000000",
+   "symbol": "btc/usd",
+   "timestamp": 1792359574000,
+   "value": 80985.89622218767
+  },
+  "timestamp": 1792359575194,
+  "topic": "crypto_prices_chainlink",
+  "type": "update"
+ }
+]

@@ -1,0 +1,37 @@
+{
+ "data": [
+  {
+   "timestamp": 1792437503,
+   "condition_id": "0xc215ef1a91ecccc98448c5a46eab12a227596cf8f18d0ff8caddbaa08e2db975",
+   "type": "REDEEM",
+   "size": 120,
+   "usdc_size": 0,
+   "transaction_hash": "0xd08b58b721494603c9ef2073c9d0456ea0aaeb4d7b3d42a1237e4289e5ce38f0",
+   "token_id": "52792440626191942109044795967022146231668706232259766195719235089662516292891"
+  },
+  {
+   "timestamp": 1792437494,
+   "condition_id": "0x08d56c243d8b22b69e229eeb9654880f34aae0fde2f1812cb2b3433ae64191b5",
+   "type": "REDEEM",
+   "size": 130,
+   "usdc_size": 130,
+   "transaction_hash": "0x43c41080843a016c57e7061f198c604e4ca481de1e6caf38b226d157a4b9d962",
+   "token_id": ""
+  },
+  {
+   "timestamp": 1792361016,
+   "condition_id": "0x5769391c864bd8c4c6a0d58eed91798c5f0ad70b8e5171b1bafc33331d32e2ae",
+   "type": "REDEEM",
+   "size": 883.54,
+   "usdc_size": 0,
+   "transaction_hash": "0xe04c2554e918e0243a4d9d3e994ba03e2f094eeddb27a3da73b77281aa4b0a5e",
+   "token_id": "103660569789447923387863757837464584230561414909685482209300952880257854705392"
+  }
+ ],
+ "pagination": {
+  "limit": 3,
+  "offset": 0,
+  "has_more": true,
+  "next_cursor": "eyJkYXRhIjp7InR5cGUiOiJhY3Rpdml0eSIsInBhcmFtcyI6eyJsIjozLCJ0cyI6MTc5MjM2MTAxNiwic3EiOiI5NTc3MDQ0NjAwMDE2MDExOTEiLCJkIjozfX0sInNpZyI6IjZlNjIzMzI2OTJmZTdmNmQ4YWU2YTZiODc3NGMwZTU1In0"
+ }
+}

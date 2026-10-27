@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "token_id": "33339798372916037220786136133406478491116150628220441951753426683441228279665",
+   "condition_id": "0xefa17dee3af09f69f9ddf245b969aa4efbe7c71cdf06ee49d694408bc33e2ed2",
+   "current_size": 2905.93,
+   "avg_price": 0.0018,
+   "entry_cost_usdc": 5.2924,
+   "entry_fees_usdc": 0.687935,
+   "total_cost_usdc": 5.980335,
+   "current_price": 0.0015,
+   "current_value": 4.3588,
+   "status": "OPEN",
+   "redeemable": false
+  }
+ ],
+ "pagination": {
+  "limit": 3,
+  "offset": 0,
+  "has_more": false,
+  "next_cursor": null
+ }
+}

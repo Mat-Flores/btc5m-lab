@@ -1,0 +1,9 @@
+[package]
+name = "engine-strategy"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# strategies are pure computations over the state they are given; serde only reads their configuration
+[dependencies]
+serde = { version = "1", features = ["derive"] }

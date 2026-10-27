@@ -1,0 +1,7 @@
+{
+ "note": "encryptKey of src/exec/wallets.js (v1: scrypt N=2^17 r=8 p=1, AES-256-GCM), throwaway key",
+ "key": "0x1111111111111111111111111111111111111111111111111111111111111111",
+ "passphrase": "phrase de test, jetable",
+ "payload": "v1.VTrR0VD2HLE1sFzTpK1XvQ.bKb20g0r8WYeWn-e.JHsWSHXE6T12T-SvzjvHew.JQquDEUtgGAOqRaN_ZP8ETK7fluf_zRe5gKLdEUZIcAirwFym-Ay713-ubm3ER0GwK7utQcwVylqmZgMpGNHR06Y",
+ "payload_bare": "v1.BvV2nSGjUS9vQMwDmCxiUQ.6o6myz1wIdJTORji.H1P-B9rmk7EVybE3FgvR2A.DAcQXyYC6qQhqbXqyJJE5UwETU4nXcSZzeDksOZOklVzpcCwCxT3GuxymgTG4lmUMoyerFoufz9Lw1KVdiQoPA"
+}

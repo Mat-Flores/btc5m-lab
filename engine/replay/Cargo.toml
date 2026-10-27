@@ -1,0 +1,18 @@
+[package]
+name = "engine-replay"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "replay"
+path = "src/main.rs"
+
+[dependencies]
+engine-strategy = { path = "../strategy" }
+# float_roundtrip: every recorded number parsed to the exact double JavaScript's JSON.parse gives
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[profile.release]
+codegen-units = 1
+lto = true

@@ -1,0 +1,45 @@
+[
+ {
+  "v": 1,
+  "channel": "price.polymarket",
+  "seq": 1,
+  "ts": 1792457573138,
+  "snapshot": true,
+  "payload": {
+   "asset_id": "60426226558337563414960524491016802299434775831240907954423384874950529052256",
+   "best_ask": "0.89",
+   "best_bid": "0.88",
+   "hash": "8fd8d2744d815f903338f491527dd0174719b976",
+   "market": "0xbca5aa7889e019ac3daa52187c682a5a9c6cc42c02a07e6bec58c25ca244d43d",
+   "timestamp": 1792457573138
+  }
+ },
+ {
+  "v": 1,
+  "channel": "price.polymarket",
+  "seq": 2,
+  "ts": 1792457573147,
+  "payload": {
+   "asset_id": "60426226558337563414960524491016802299434775831240907954423384874950529052256",
+   "best_ask": "0.89",
+   "best_bid": "0.88",
+   "hash": "582fe6036fa4e272217917cce440e9173b8d055c",
+   "market": "0xbca5aa7889e019ac3daa52187c682a5a9c6cc42c02a07e6bec58c25ca244d43d",
+   "timestamp": 1792457573147
+  }
+ },
+ {
+  "v": 1,
+  "channel": "price.polymarket",
+  "seq": 3,
+  "ts": 1792457573158,
+  "payload": {
+   "asset_id": "60426226558337563414960524491016802299434775831240907954423384874950529052256",
+   "best_ask": "0.89",
+   "best_bid": "0.88",
+   "hash": "6d8c4e0c09415c9f3f61d1c6a21f159e29a240e1",
+   "market": "0xbca5aa7889e019ac3daa52187c682a5a9c6cc42c02a07e6bec58c25ca244d43d",
+   "timestamp": 1792457573158
+  }
+ }
+]

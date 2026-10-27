@@ -1,0 +1,77 @@
+[
+ {
+  "market": "0x053dcc8e843c76f3b46a745a5e1aaf2899fb7a619f82c66e95c598b7d316ae3f",
+  "price_changes": [
+   {
+    "asset_id": "63158993886593004816627017660032160856448045668801577226277381508921459163618",
+    "price": "0.35",
+    "size": "222.03",
+    "side": "BUY",
+    "hash": "0e4bf4b41f441aa256f3e64378dda08aa67929c3",
+    "best_bid": "0.43",
+    "best_ask": "0.44"
+   },
+   {
+    "asset_id": "19619516167937651110922388517145427855183312694833666940546784442760281738232",
+    "price": "0.65",
+    "size": "222.03",
+    "side": "SELL",
+    "hash": "716d6ee5b8deb07a73d6dd9962fb0d56510cace0",
+    "best_bid": "0.56",
+    "best_ask": "0.57"
+   }
+  ],
+  "timestamp": "1792359572098",
+  "event_type": "price_change"
+ },
+ {
+  "market": "0x053dcc8e843c76f3b46a745a5e1aaf2899fb7a619f82c66e95c598b7d316ae3f",
+  "price_changes": [
+   {
+    "asset_id": "63158993886593004816627017660032160856448045668801577226277381508921459163618",
+    "price": "0.34",
+    "size": "217.25",
+    "side": "BUY",
+    "hash": "2a87ba99ae51ed7b0fdee385c8da0f7e3da1232d",
+    "best_bid": "0.43",
+    "best_ask": "0.44"
+   },
+   {
+    "asset_id": "19619516167937651110922388517145427855183312694833666940546784442760281738232",
+    "price": "0.66",
+    "size": "217.25",
+    "side": "SELL",
+    "hash": "e39ed51523e15655e55a43913ae169f7fea8462e",
+    "best_bid": "0.56",
+    "best_ask": "0.57"
+   }
+  ],
+  "timestamp": "1792359572098",
+  "event_type": "price_change"
+ },
+ {
+  "market": "0x053dcc8e843c76f3b46a745a5e1aaf2899fb7a619f82c66e95c598b7d316ae3f",
+  "price_changes": [
+   {
+    "asset_id": "63158993886593004816627017660032160856448045668801577226277381508921459163618",
+    "price": "0.33",
+    "size": "217.14",
+    "side": "BUY",
+    "hash": "16bbc63dff759299d95a621db3d55cf41142bf4d",
+    "best_bid": "0.43",
+    "best_ask": "0.44"
+   },
+   {
+    "asset_id": "19619516167937651110922388517145427855183312694833666940546784442760281738232",
+    "price": "0.67",
+    "size": "217.14",
+    "side": "SELL",
+    "hash": "90da9d90e0d6f9e0af3d90dd3dec29e60a641c1d",
+    "best_bid": "0.56",
+    "best_ask": "0.57"
+   }
+  ],
+  "timestamp": "1792359572099",
+  "event_type": "price_change"
+ }
+]

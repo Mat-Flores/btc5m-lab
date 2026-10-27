@@ -1,0 +1,24 @@
+[
+ {
+  "event": "subscribe",
+  "arg": {
+   "channel": "bbo-tbt",
+   "instId": "BTC-USDT-SWAP"
+  },
+  "connId": "6467c5b8"
+ },
+ {
+  "event": "error",
+  "msg": "Subscribe failed, wrong URL or channel:bbo-tbt,instId:NOPE-XXX doesn't exist. Please use the correct URL, channel and parameters referring to API document.",
+  "code": "60018",
+  "connId": "6467c5b8"
+ },
+ {
+  "event": "unsubscribe",
+  "arg": {
+   "channel": "bbo-tbt",
+   "instId": "BTC-USDT-SWAP"
+  },
+  "connId": "6467c5b8"
+ }
+]
