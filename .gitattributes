@@ -1,0 +1,4 @@
+* text=auto eol=lf
+# copies identiques à l octet du dépôt source : jamais de conversion de fin de ligne
+CLAUDE.md -text
+.claude/** -text

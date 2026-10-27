@@ -1,0 +1,24 @@
+{
+  "enabledPlugins": {
+    "agentic-actions-auditor@trailofbits": false,
+    "chrome-devtools-mcp@claude-plugins-official": false,
+    "claude-security@claude-plugins-official": true,
+    "context7@claude-plugins-official": false,
+    "differential-review@trailofbits": true,
+    "frontend-design@claude-plugins-official": false,
+    "impeccable@impeccable": false,
+    "insecure-defaults@trailofbits": true,
+    "modern-python@trailofbits": false,
+    "n8n-mcp-skills@n8n-mcp-skills": false,
+    "pg@aiguide": false,
+    "property-based-testing@trailofbits": true,
+    "quantitative-trading@claude-code-workflows": false,
+    "security-guidance@claude-plugins-official": true,
+    "sharp-edges@trailofbits": true,
+    "static-analysis@trailofbits": false,
+    "supply-chain-risk-auditor@trailofbits": true,
+    "dimensional-analysis@trailofbits": true,
+    "spec-to-code-compliance@trailofbits": true,
+    "skill-creator@claude-plugins-official": false
+  }
+}
