@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Usage : pull-traces [--dry-run] <ssh-dest> <cle-ssh> [--local <racine locale>]
+# Rapatrie les jours VALIDES (manifeste present, jamais le jour UTC en cours ni un .part-*), verifie taille + sha256
+# en local, et ne supprime cote serveur (donnees puis manifeste) qu'apres verification reussie.
+# Sans rsync : ssh + cat. Idempotent ; un .tmp local orphelin est supprime et retelecharge.
+set -uo pipefail
+
+DRY=0; LOCAL=""; POS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY=1 ;;
+    --local) shift; LOCAL="${1:-}" ;;
+    *) POS+=("$1") ;;
+  esac
+  shift
+done
+DEST="${POS[0]:-}"; KEY="${POS[1]:-}"
+[ -n "$DEST" ] && [ -n "$KEY" ] || { echo "usage: $0 [--dry-run] <ssh-dest> <cle-ssh> [--local <racine>]"; exit 2; }
+[ -n "$LOCAL" ] || LOCAL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/source-tracing/trace"
+ROOT="${REMOTE_TRACE_ROOT:-/var/lib/updown5m/trace}"
+RUSER="${REMOTE_USER:-tgap}"
+case "$ROOT" in /?*) [ "$ROOT" != / ] || { echo "racine distante invalide"; exit 2; } ;; *) echo "racine distante invalide"; exit 2 ;; esac
+
+# Execute une commande sh cote serveur, en tant que tgap. PT_TEST_NOSSH=1 : en local (tests).
+rsh() {
+  if [ "${PT_TEST_NOSSH:-}" = 1 ]; then sh -c "$1"
+  else ssh -i "$KEY" -o BatchMode=yes -o IdentitiesOnly=yes "$DEST" "sudo -n -u $RUSER sh -c '$1'"; fi
+}
+
+mkdir -p "$LOCAL" || exit 1
+LOCK="$LOCAL/.pull-traces.lock"
+mkdir "$LOCK" 2>/dev/null || { echo "un autre pull-traces tourne (ou lock orphelin) : $LOCK"; exit 1; }
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+
+TODAY=$(date -u +%F)
+NOK=0; NSKIP=0; NFAIL=0; NCUR=0; BYTES=0; NDEL=0
+
+LIST=$(rsh "cd $ROOT && find . -mindepth 4 -maxdepth 4 -type f -name \"*.manifest.json\"") || { echo "ECHEC : listage serveur"; exit 1; }
+LIST=$(printf '%s\n' "$LIST" | sed 's|^\./||' | sort)
+
+sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+size_of() { wc -c < "$1" | tr -d ' '; }
+# sync <fichier> echoue sous Git Bash (Permission denied) : repli sur le sync global
+flush() { sync -- "$@" 2>/dev/null || sync; }
+fail() { echo "  ECHEC : $*"; NFAIL=$((NFAIL+1)); }
+
+while IFS= read -r M; do
+  [ -n "$M" ] || continue
+  # chemin strict : jamais de '..', rien hors <source>/<AAAA>/<MM>/<nom>.manifest.json
+  if ! [[ "$M" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*/[0-9]{4}/[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}[A-Za-z0-9._-]*\.manifest\.json$ ]]; then
+    echo "ignore (nom inattendu) : $M"; continue
+  fi
+  case "$M" in *..*) echo "ignore (..) : $M"; continue ;; esac
+  BASE=$(basename "$M"); DAY=${BASE:0:10}
+  if [ "$DAY" = "$TODAY" ]; then NCUR=$((NCUR+1)); continue; fi
+  D="${M%.manifest.json}.jsonl.gz"
+  echo "$M"
+
+  MAN=$(rsh "cat -- $ROOT/$M") || { fail "lecture manifeste"; continue; }
+  SHA=$(printf '%s' "$MAN" | sed -nE 's/.*"sha256" *: *"([0-9a-f]{64})".*/\1/p' | head -1)
+  BYT=$(printf '%s' "$MAN" | tr -d '\n' | sed -nE 's/.*"bytes" *: *([0-9]+).*/\1/p' | head -1)
+  [ -n "$SHA" ] && [ -n "$BYT" ] || { fail "manifeste sans sha256/bytes"; continue; }
+
+  LD="$LOCAL/$D"; LM="$LOCAL/$M"; mkdir -p "$(dirname "$LD")"
+  rm -f "$LD.tmp" "$LM.tmp"            # .tmp orphelin (interruption) : jamais reutilise
+  HAVE=0
+  if [ -f "$LD" ] && [ "$(size_of "$LD")" = "$BYT" ] && [ "$(sha_of "$LD")" = "$SHA" ]; then HAVE=1; fi
+
+  if [ "$HAVE" = 1 ]; then
+    echo "  deja present et verifie ($BYT octets)"; NSKIP=$((NSKIP+1))
+  else
+    echo "  a telecharger ($BYT octets)"
+    if [ "$DRY" = 1 ]; then NOK=$((NOK+1)); echo "  [dry-run] puis suppression cote serveur"; continue; fi
+    if ! rsh "cat -- $ROOT/$D" > "$LD.tmp"; then rm -f "$LD.tmp"; fail "telechargement"; continue; fi
+    if [ "$(size_of "$LD.tmp")" != "$BYT" ] || [ "$(sha_of "$LD.tmp")" != "$SHA" ]; then
+      rm -f "$LD.tmp"; fail "taille ou sha256 different du manifeste (serveur intact)"; continue
+    fi
+    printf '%s' "$MAN" > "$LM.tmp" && mv -f "$LD.tmp" "$LD" && mv -f "$LM.tmp" "$LM" || { fail "renommage local"; continue; }
+    NOK=$((NOK+1)); BYTES=$((BYTES+BYT))
+  fi
+  if [ "$HAVE" = 1 ] && [ ! -f "$LM" ]; then printf '%s' "$MAN" > "$LM.tmp" && mv -f "$LM.tmp" "$LM"; fi
+
+  if [ "$DRY" = 1 ]; then echo "  [dry-run] suppression cote serveur"; continue; fi
+  flush "$LD" "$LM" || { fail "sync disque local"; continue; }
+  # suppression : exactement ces deux chemins, donnees d'abord, manifeste (point de validation) ensuite
+  if rsh "cd $ROOT && rm -f -- \"$D\" && rm -f -- \"$M\""; then NDEL=$((NDEL+1)); echo "  supprime cote serveur"
+  else fail "suppression serveur"; fi
+done <<< "$LIST"
+
+echo "== bilan : telecharges OK=$NOK, deja presents=$NSKIP, echecs=$NFAIL, octets telecharges=$BYTES, supprimes serveur=$NDEL, jour en cours ignores=$NCUR$([ "$DRY" = 1 ] && echo ' (dry-run : rien modifie)')"
+[ "$NFAIL" = 0 ]
