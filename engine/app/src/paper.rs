@@ -29,7 +29,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 fn one_way() -> f64 { 12.2 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PaperCfg {
     pub ledger: String,
     /// Gzip'd session file (`gzip` on the PATH).

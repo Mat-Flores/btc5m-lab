@@ -73,4 +73,19 @@ mod tests {
         assert!(strategy("maker", serde_json::json!({ "offset": 0.01 }), &btc).is_err());
         assert!(strategy("other", serde_json::json!({}), &btc).is_err());
     }
+
+    /// The price sources added in the migration resolve by their configured name and decode their real frames.
+    #[test]
+    fn new_price_sources_are_registered_and_decode_their_fixtures() {
+        for (kind, file) in [("binance-spot", "binance-spot-btcusdt.json"), ("binance-perp", "binance-perp-btcusdt.json"), ("coinbase", "coinbase-ticker-BTC-USD.json")] {
+            let (mut a, books) = feed_adapter(kind).unwrap();
+            assert!(!books, "{kind}");
+            let path = format!("{}/../fixtures/raw/{file}", env!("CARGO_MANIFEST_DIR"));
+            let frames: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            let frames: Vec<String> = frames.iter().map(Value::to_string).collect();
+            // the subscription answer carries nothing; every other frame is one event at least
+            assert!(engine_core::conformance::decodes(a.as_mut(), &frames).len() >= frames.len() - 1, "{kind}");
+        }
+        assert!(feed_adapter("binance").is_none());
+    }
 }

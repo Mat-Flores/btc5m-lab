@@ -37,14 +37,17 @@ mod paper;
 
 fn one() -> usize { 1 }
 fn ten() -> u64 { 10 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct SourceCfg { name: String, adapter: String, #[serde(default)] topics: Vec<String>, #[serde(default = "one")] connections: usize }
 /// The account the engine keeps the books of: `address` holds the shares (read in public at data-api).
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct AccountCfg { #[serde(default)] address: String, #[serde(default)] stop_loss: StopLoss, #[serde(default = "ten")] reconcile_s: u64 }
 /// The market of the original application: Polymarket BTC "Up or Down" 5 minutes.
 fn btc_5m() -> MarketSpec { MarketSpec { venue: "polymarket".into(), asset: "btc".into(), horizon_s: 300 } }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct Config { #[serde(default = "btc_5m")] market: MarketSpec, ledger: String, seconds: u64, sources: Vec<SourceCfg>, #[serde(default)] bench_orders: bool, #[serde(default)] account: Option<AccountCfg>,
     /// Paper mode (phase 9): the reference strategy on the live feeds, nothing sent (`paper.rs`).
     #[serde(default)] paper: Option<paper::PaperCfg>,
@@ -664,5 +667,28 @@ mod tests {
         }
         assert_eq!(h.dist()["max"], serde_json::json!(q(&mut v, 1.0)));
         assert_eq!(Hist::default().dist()["p50"], serde_json::Value::Null);
+    }
+
+    /// `config.example.json` holds every key the engine reads (unknown keys are refused; written back, the parsed
+    /// config gives the file again), and every value it does not need to state is the code's default.
+    #[test]
+    fn config_example_is_valid_complete_and_default() {
+        let file: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../config.example.json")).unwrap()).unwrap();
+        let cfg: Config = serde_json::from_value(file.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&cfg).unwrap(), file);
+        // only what has no default (or differs from it): the rest of the file must be the defaults
+        let minimal = serde_json::json!({ "ledger": "engine.jsonl", "seconds": 1800, "sources": [
+            { "name": "polymarket", "adapter": "polymarket-market", "connections": 3 },
+            { "name": "chainlink", "adapter": "chainlink-rtds", "topics": ["btc/usd"] },
+            { "name": "okx", "adapter": "okx-bbo-tbt", "topics": ["BTC-USDT-SWAP"] },
+            { "name": "binance-spot", "adapter": "binance-spot", "topics": ["btcusdt"] },
+            { "name": "binance-perp", "adapter": "binance-perp", "topics": ["btcusdt"] },
+            { "name": "coinbase", "adapter": "coinbase", "topics": ["BTC-USD"] }],
+            "account": {}, "paper": { "ledger": "paper.jsonl", "capture": "session.jsonl.gz", "strategy": { "source": "okx" } }, "live": { "wallet_file": "wallet.txt" } });
+        assert_eq!(serde_json::to_value(serde_json::from_value::<Config>(minimal).unwrap()).unwrap(), file);
+        for s in &cfg.sources { assert!(engine_app::registry::feed_adapter(&s.adapter).is_some(), "{}", s.adapter); }
+        let mut typo = file.clone();
+        typo["account"]["stop_loss"]["los"] = 1.into();
+        assert!(serde_json::from_value::<Config>(typo).is_err());
     }
 }

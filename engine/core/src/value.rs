@@ -89,7 +89,7 @@ pub fn value(p: &Position, book: Option<&Book>, book_age_ms: i64) -> Option<Valu
 /// Sells a position whose latent result falls to `loss` of its cost, except in the last `quiet_s` of its window
 /// (02-conception.md §10, decision 5). Acts from the venue's match, before confirmation (decision 8).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct StopLoss {
     /// Millionths of the cost: 500 000 = −50 %.
     pub loss: Micro,

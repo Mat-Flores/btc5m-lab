@@ -14,7 +14,7 @@ use engine_core::market::Window;
 use engine_core::money::Micro;
 use engine_core::order::{Input, Order, Phase, TradeStatus};
 use std::collections::BTreeSet;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,7 +23,8 @@ use zeroize::Zeroizing;
 
 fn five() -> Micro { 5_000_000 }
 fn one() -> u32 { 1 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LiveCfg {
     /// File holding the wallet line; refused if its group or others may read it.
     pub wallet_file: String,

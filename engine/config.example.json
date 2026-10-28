@@ -1,0 +1,59 @@
+{
+  "market": { "venue": "polymarket", "asset": "btc", "horizon_s": 300 },
+  "ledger": "engine.jsonl",
+  "seconds": 1800,
+  "sources": [
+    { "name": "polymarket", "adapter": "polymarket-market", "topics": [], "connections": 3 },
+    { "name": "chainlink", "adapter": "chainlink-rtds", "topics": ["btc/usd"], "connections": 1 },
+    { "name": "okx", "adapter": "okx-bbo-tbt", "topics": ["BTC-USDT-SWAP"], "connections": 1 },
+    { "name": "binance-spot", "adapter": "binance-spot", "topics": ["btcusdt"], "connections": 1 },
+    { "name": "binance-perp", "adapter": "binance-perp", "topics": ["btcusdt"], "connections": 1 },
+    { "name": "coinbase", "adapter": "coinbase", "topics": ["BTC-USD"], "connections": 1 }
+  ],
+  "bench_orders": false,
+  "account": {
+    "address": "",
+    "stop_loss": { "loss": 500000, "quiet_s": 60 },
+    "reconcile_s": 10
+  },
+  "paper": {
+    "ledger": "paper.jsonl",
+    "capture": "session.jsonl.gz",
+    "strategy": {
+      "source": "okx",
+      "paused": false,
+      "off": false,
+      "minEdge": 0.1,
+      "minFair": 0.6,
+      "jump": 0.2,
+      "sigmaMult": 1.5,
+      "lookback": 5.0,
+      "minTau": 5.0,
+      "maxTau": 300.0,
+      "cooldownMs": 2000.0,
+      "maxEntriesPerWindow": 1.0,
+      "bankroll": 1000.0,
+      "stakeUsd": 100.0,
+      "maxOpen": 0.0,
+      "maxOpenFrac": 0.5,
+      "dailyStopFrac": 0.3,
+      "exit": "hold",
+      "takeProfit": 0.02,
+      "maxHoldSec": 60.0,
+      "exitSlippage": 0.03,
+      "signMs": 3.0,
+      "matchMs": 10.0,
+      "defaultRttMs": 150.0,
+      "rttShare": 1.0,
+      "extraMs": 0.0
+    },
+    "one_way_ms": 12.2,
+    "taker_delay_ms": 150
+  },
+  "live": {
+    "wallet_file": "wallet.txt",
+    "max_order": 5000000,
+    "session_loss": 5000000,
+    "orders": 1
+  }
+}
