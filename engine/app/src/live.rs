@@ -3,12 +3,17 @@
 //! <v1 encrypted key>`, `src/exec/wallets.js`) from a file only its owner can read, and the passphrase from the first
 //! line of stdin; the key lives in memory only. Orders go out on a task of their own, so the hot thread never waits
 //! for the venue.
+use super::{Fact, Rec};
 use adapter_polymarket::exec::{self, Clob, Creds, Sent, ALLOWED, HOST};
-use adapter_polymarket::sign::Signer;
-use engine_core::clock::Clock;
-use engine_core::guard::NetGuard;
+use adapter_polymarket::sign::{self, Signer};
+use engine_app::engine::{Amount, Command, Tif, Venue, VenueEvent};
+use engine_core::account::{self, Account, Dir};
+use engine_core::clock::{Clock, Stamp};
+use engine_core::guard::{Context, Guards, Limits, NetGuard};
+use engine_core::market::Window;
 use engine_core::money::Micro;
-use engine_core::order::{Order, Phase};
+use engine_core::order::{Input, Order, Phase, TradeStatus};
+use std::collections::BTreeSet;
 use serde::Deserialize;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -116,6 +121,119 @@ pub fn spawn_sender(a: &Armed, armed: Arc<AtomicBool>, clock: Arc<Clock>) -> (mp
         }
     });
     (tx, done_rx)
+}
+
+/// What the ledger needs of a real order's market to write its trades.
+pub struct Meta { pub token: String, pub market: String, pub fee_rate: Micro, pub fee_exponent: u32, pub end_ms: u64, pub decided_ns: u64 }
+
+/// The real venue: the guards, the orders of this run, and the sender task. Only FAK buys are sent (the reference
+/// holds to settlement); anything else is refused and recorded. What the shell knows of the run (valid sources,
+/// reconciliation, result, balance) is set before each `submit`.
+pub struct LiveVenue {
+    pub armed: Armed,
+    pub guards: Guards,
+    max_orders: u32,
+    tx: mpsc::UnboundedSender<ToSend>,
+    /// This run's orders, by their live number (the ledger's `n`); `engine_n`: the engine's number of each.
+    pub orders: Vec<(Meta, Order)>,
+    engine_n: Vec<u32>,
+    /// User channel trades of an order whose id is not known yet (the channel may beat the answer), replayed after it.
+    pub early: Vec<(String, String, TradeStatus, Micro, Micro)>,
+    windows: Vec<Window>,
+    pub sources_valid: bool,
+    pub reconciled: bool,
+    pub session_pnl: Micro,
+    pub balance: Option<Micro>,
+    /// Facts to write, drained by the shell after each call.
+    pub facts: Vec<Fact>,
+    /// Answers the sender gave back (`Done`), handed in by the shell, read by `poll`.
+    pub inbox: Vec<Done>,
+}
+
+impl LiveVenue {
+    pub fn new(a: Armed, l: &LiveCfg, armed: Arc<AtomicBool>, clock: Arc<Clock>) -> (LiveVenue, mpsc::UnboundedReceiver<Done>) {
+        let (tx, rx) = spawn_sender(&a, armed.clone(), clock);
+        let guards = Guards::new(Limits { max_order: l.max_order, session_loss: l.session_loss }, armed);
+        // "orders": 0 arms for the reads only (credentials, balance, user channel): nothing may open
+        guards.stop.store(l.orders == 0, std::sync::atomic::Ordering::Release);
+        (LiveVenue { armed: a, guards, max_orders: l.orders, tx, orders: vec![], engine_n: vec![], early: vec![], windows: vec![], sources_valid: false, reconciled: false,
+            session_pnl: 0, balance: None, facts: vec![], inbox: vec![] }, rx)
+    }
+
+    pub fn window(&mut self, w: &Window) { self.windows.push(w.clone()); let last = w.start; self.windows.retain(|x| x.start + 3600 > last); }
+
+    /// Orders that may rest at the venue (accepted, nothing matched yet), for the reconciliation.
+    pub fn resting(&self) -> BTreeSet<String> { self.orders.iter().filter(|(_, o)| o.phase == Phase::Acked).filter_map(|(_, o)| o.id.clone()).collect() }
+
+    /// A trade of the user channel: to its order, and as an accounting fact with the venue's size and price.
+    pub fn trade(&mut self, order: String, trade: String, status: TradeStatus, size: Micro, price: Micro, rec: &Rec, acct: &mut Account) {
+        let Some((m, o)) = self.orders.iter_mut().find(|(_, o)| o.id.as_deref() == Some(order.as_str())) else {
+            // not ours, or ours before its answer: kept a while (an account trades rarely)
+            if self.early.len() < 1000 { self.early.push((order, trade, status, size, price)); }
+            return;
+        };
+        let _ = o.apply(Input::Trade { id: trade.clone(), status, size, price });
+        rec.keep(acct, account::Fact::Trade { trade, order, market: m.market.clone(), token: m.token.clone(), dir: account::Dir::Buy, status, size, price,
+            fee_rate: m.fee_rate, fee_exponent: m.fee_exponent, end_ms: m.end_ms });
+    }
+
+    fn refuse(&mut self, slug: String, why: String) { self.facts.push(Fact::LiveRefused { slug, why }); }
+}
+
+impl Venue for LiveVenue {
+    /// Each command past the guards becomes a real order, signed here, written by the sender.
+    fn submit(&mut self, cmd: Command, now: Stamp) {
+        let Command::Place { n: engine_n, intent: d, maker, taker, .. } = cmd else { return self.refuse(String::new(), "cancel not sent (FAK only)".into()) };
+        let Some(w) = self.windows.iter().find(|w| w.tokens.contains(&d.token)) else { return self.refuse(String::new(), "market unknown".into()) };
+        let (slug, market, fee, end) = (w.slug.clone(), w.market.clone(), w.fee, w.end);
+        if d.tif != Tif::Fak { return self.refuse(slug, format!("{:?} not sent (FAK only)", d.tif)); }
+        // shortcut: buys only (the reference holds to settlement, exit "hold"); a sell would need the held size checked
+        if d.side != Dir::Buy || !matches!(d.amount, Amount::Usd(_)) { return self.refuse(slug, "sell not sent".into()); }
+        let ctx = Context {
+            sources_valid: self.sources_valid,
+            order_pending: self.orders.iter().any(|(_, o)| o.blocks_openings()),
+            reconciled: self.reconciled,
+            clock_synced: self.armed.clock_synced,
+            prepared: end * 1_000_000_000 > now.wall_ns,
+            // shortcut: realized only; the latent part waits for a run with more than a few orders
+            session_pnl: self.session_pnl,
+            now_ns: now.mono_ns,
+        };
+        if let Err(r) = self.guards.check_open(maker as Micro, &ctx) { return self.refuse(slug, format!("{r:?}")); }
+        // trading goes on while the wallet can pay: the last balance read must cover the order
+        if self.balance.is_none_or(|b| b < maker as Micro) { let why = format!("balance {:?} < {}", self.balance, maker); return self.refuse(slug, why); }
+        let o = sign::Order { salt: (now.wall_ns / 1000) & ((1 << 53) - 1), token_id: d.token.clone(), maker_amount: maker, taker_amount: taker, side: sign::Side::Buy, timestamp_ms: now.wall_ns / 1_000_000 };
+        let hash = self.armed.signer.order_hash(&o);
+        let body = self.armed.signer.body(&o, &self.armed.creds.key);
+        let req = match exec::order_request(HOST, &self.armed.signer, &self.armed.creds, &body, now.wall_ns / 1_000_000_000) {
+            Ok(r) => r,
+            Err(e) => return self.refuse(slug, format!("{e:?}")),
+        };
+        let mut order = Order::default();
+        let _ = order.apply(Input::Signed);
+        let n = self.orders.len() as u32;
+        self.facts.push(Fact::LiveOrder { n, slug, token: d.token.clone(), limit: d.limit, maker, taker, hash: hash.clone() });
+        self.orders.push((Meta { token: d.token, market, fee_rate: fee.rate, fee_exponent: fee.exponent, end_ms: end * 1000, decided_ns: now.mono_ns }, order.clone()));
+        self.engine_n.push(engine_n);
+        // the count of this run: once reached, the stop refuses every further opening
+        if self.orders.len() as u32 >= self.max_orders { self.guards.stop.store(true, std::sync::atomic::Ordering::Release); }
+        let _ = self.tx.send(ToSend { n, order, req, hash });
+    }
+
+    /// What the venue answered (and queries learnt), from the answers handed in.
+    fn poll(&mut self, until: Stamp, out: &mut Vec<(Stamp, VenueEvent)>) {
+        for Done { n, order, sent } in std::mem::take(&mut self.inbox) {
+            let m = &self.orders[n as usize].0;
+            self.facts.push(Fact::LiveAnswer { n, phase: order.phase, id: order.id.clone(),
+                decision_to_written_us: sent.written.map(|w| (w.mono_ns - m.decided_ns) as f64 / 1000.0),
+                written_to_answer_ms: sent.written.zip(sent.answered).map(|(w, a)| (a.mono_ns - w.mono_ns) as f64 / 1e6), late: sent.late,
+                status: sent.raw.as_ref().map(|r| r.status), body: sent.raw.as_ref().map(|r| String::from_utf8_lossy(&r.body).chars().take(2000).collect()), back_off_s: sent.back_off_s });
+            if let Some(s) = sent.back_off_s { self.guards.back_off_until_ns = until.mono_ns + s * 1_000_000_000; }
+            let input = sent.raw.as_ref().map_or(Input::NoAnswer, |r| exec::read_answer(r).input);
+            self.orders[n as usize].1 = order;
+            out.push((until, VenueEvent::Answer { n: self.engine_n[n as usize], input }));
+        }
+    }
 }
 
 #[cfg(test)]

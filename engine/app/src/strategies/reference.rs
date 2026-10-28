@@ -143,3 +143,43 @@ impl Strategy for Shared {
     fn on_tick(&mut self, at: Stamp, out: &mut Vec<Decision>) { self.0.borrow_mut().on_tick(at, out) }
     fn stats(&self) -> Vec<(&'static str, f64)> { self.0.borrow().stats() }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{Command, Engine, EngineInput};
+    use engine_core::event::Level;
+    use engine_core::market::FeeSchedule;
+
+    const S: u64 = 1_792_359_300;
+    fn at(ms: u64) -> Stamp { Stamp { mono_ns: ms * 1_000_000, wall_ns: (S * 1000 + ms) * 1_000_000 } }
+    fn ev(source: u16, ms: u64, event_ms: Option<u64>, payload: Payload) -> engine_core::event::Event { engine_core::event::Event { source, recv: at(ms), event_ms, seq: None, payload } }
+
+    /// An order of the strategy becomes a FAK command whose amounts are the strategy's own (what the live mode sent).
+    #[test]
+    fn an_order_of_the_reference_is_a_fak_command_with_its_amounts() {
+        let cfg: Config = serde_json::from_value(serde_json::json!({ "source": "okx", "jump": 0, "minFair": 0, "minEdge": 0.05 })).unwrap();
+        let mut r = RefStrategy::new(cfg, "chainlink".into());
+        r.keep = true;
+        let shared = Rc::new(RefCell::new(r));
+        let mut e = Engine::new(vec![("okx".into(), false), ("chainlink".into(), false), ("polymarket".into(), true)], vec![Box::new(Shared(shared.clone()))]).unwrap();
+        e.used[2] = true;
+        let w = Window { start: S, end: S + 300, slug: format!("btc-updown-5m-{S}"), market: "m".into(), tokens: ["up".into(), "down".into()], tick: 10_000, min_size: 5_000_000,
+            fee: FeeSchedule { rate: 70_000, exponent: 1, rebate_rate: 200_000 }, taker_delay: true, twap_s: Some(60), price_to_beat: Some(81_000_000_000), winner: None };
+        let mut out = vec![];
+        e.on(EngineInput::Window(w), at(0), &mut out);
+        // spot 81 050 against a strike of 81 000 with 100 s to go: Up is worth far more than an ask of 0.30
+        for k in 0..5u64 {
+            e.on(EngineInput::Feed(ev(0, 200_000 + k * 500, Some(S * 1000 + 200_000 + k * 500), Payload::Quote { bid: 81_050_000_000 + k as i64, ask: 81_050_100_000 + k as i64 })), at(200_000 + k * 500), &mut out);
+            e.on(EngineInput::Feed(ev(1, 200_100 + k * 500, Some(S * 1000 + 199_900 + k * 500), Payload::Oracle { value: 81_050_000_000 })), at(200_100 + k * 500), &mut out);
+        }
+        let lv = |p, s| Level { price: p, size: s };
+        e.on(EngineInput::Feed(ev(2, 203_000, Some(S * 1000 + 202_990), Payload::BookSnapshot { asset: "up".into(), bids: vec![lv(290_000, 50_000_000)], asks: vec![lv(300_000, 400_000_000)], tick: Some(10_000) })), at(203_000), &mut out);
+        let orders: Vec<_> = shared.borrow().records.iter().filter_map(|(r, id)| match r { Rec::Order { maker, taker, limit, .. } => Some((*maker as u64, *taker as u64, *limit, *id)), _ => None }).collect();
+        assert_eq!(orders.len(), 1, "{:?}", shared.borrow().records.len());
+        let (maker, taker, limit, id) = orders[0];
+        let Command::Place { intent, maker: m, taker: t, .. } = &out[0] else { panic!("{out:?}") };
+        assert_eq!((intent.client_id, intent.tif, intent.side, *m, *t, intent.limit), (id.unwrap(), Tif::Fak, Dir::Buy, maker, taker, (limit * 1e6).round() as Micro));
+        assert_eq!(intent.amount, Amount::Usd(maker as Micro));
+    }
+}

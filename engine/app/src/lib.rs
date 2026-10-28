@@ -1,2 +1,5 @@
-//! Engine application: the registry of adapters (and, below, the engine shared by the live and test shells).
+//! Engine application: the engine shared by the live shell (`main.rs`) and the test shell (`backtest/`), its
+//! strategies, and the registry that maps configuration names to adapters and strategies.
+pub mod engine;
 pub mod registry;
+pub mod strategies;

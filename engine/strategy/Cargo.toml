@@ -7,3 +7,7 @@ publish = false
 # strategies are pure computations over the state they are given; serde only reads their configuration
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# reads the reference cases of the maker port (fixtures/maker/cases.json); already in the workspace
+serde_json = "1"

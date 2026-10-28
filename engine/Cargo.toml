@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "strategy", "adapters/polymarket", "adapters/chainlink", "adapters/okx", "app"]
+members = ["core", "strategy", "adapters/polymarket", "adapters/chainlink", "adapters/okx", "adapters/binance", "adapters/coinbase", "app"]
 # session replay (phase 8): its own lockfile, so that its exact float parsing never reaches the live binary
 exclude = ["replay"]
 

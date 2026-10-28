@@ -1,13 +1,15 @@
-//! Engine binary (phase 4: market data only). Sources come from the configuration; an unlisted source is neither
-//! loaded nor connected. Hot thread: feeds, books, health. Cold thread: window discovery (HTTP). Ledger thread:
-//! facts. Usage: engine <config.json>
+//! Engine binary: the live shell around the engine (`engine_app::engine`). Sources come from the configuration; an
+//! unlisted source is neither loaded nor connected. Hot thread: feeds, health, connection choice, the engine (books,
+//! strategies, commands), the venue (paper or live). Cold thread: window discovery (HTTP). Ledger thread: facts.
+//! Usage: engine <config.json>
 //! Config: every key, with its default, in `config.example.json` (market: BTC 5 minutes by default).
 //!
 //! A book source may run several connections: the delay of a connection depends on the path it lands on (measured:
 //! 82 ms against 9 ms at the same moment). Each connection keeps its own books; the engine uses the books of the
 //! freshest valid connection, so a slow path is left aside and a cut costs no wait.
 use adapter_polymarket::account::{self as venue, Holding, Redemption};
-use adapter_polymarket::exec::{self as clob, Clob, Creds, ALLOWED, HOST};
+use adapter_polymarket::exec::{Clob, Creds, ALLOWED, HOST};
+use engine_app::engine::{Command, Decision, Engine, EngineInput, Venue as _};
 use engine_core::guard::NetGuard;
 use adapter_polymarket::sign::{self, Signer};
 use adapter_polymarket::windows;
@@ -18,9 +20,8 @@ use engine_core::clock::Clock;
 use engine_core::event::{Payload, SourceId};
 use engine_core::feed::{self, Cmd, Out};
 use engine_core::ledger::{read_all, spawn_writer, Ledger, Stamped, SyncPolicy};
-use engine_core::guard::{Context, Guards, Limits};
 use engine_core::money::Micro;
-use engine_core::order::{Input, Order, Phase};
+use engine_core::order::{Input, Phase};
 use engine_core::reconcile::{reconcile, Venue, Verdict};
 use engine_core::supervisor::Health;
 use engine_core::value::{value, StopLoss, Trigger, Valuation};
@@ -52,7 +53,7 @@ struct Config { #[serde(default = "btc_5m")] market: MarketSpec, ledger: String,
 
 /// What the cold thread read about the account. `None`: not read.
 struct Reads { holdings: Option<Vec<Holding>>, redemptions: Option<Vec<Redemption>>, balance: Option<Micro>, open_orders: Option<BTreeSet<String>> }
-enum Cold { Account(Reads), Resolved { market: String, winner: String, slug: String, up_won: bool, price_to_beat: Option<Micro> } }
+enum Cold { Account(Reads), Resolved { market: String, winner: String, up_won: bool, price_to_beat: Option<Micro> } }
 
 /// One ledger line: an accounting fact (read back at startup) or any other fact.
 #[derive(Serialize)]
@@ -121,7 +122,6 @@ struct Conn {
     label: String,
     source: usize,
     cmd: mpsc::UnboundedSender<Cmd>,
-    books: Option<Books>,
     broken: HashMap<String, Broken>,
     valid: bool,
     invalid_since: Option<u64>,
@@ -148,8 +148,8 @@ impl Conn {
         if !self.broken.contains_key(&asset) { self.broken.insert(asset.clone(), Broken { since: now_ns, last_resync: now_ns }); self.resync(&asset); }
     }
 
-    /// Usable for trading: valid, and every book of the live windows usable.
-    fn ready(&self, assets: &[&String]) -> bool { self.valid && self.books.as_ref().is_some_and(|b| assets.iter().all(|a| b.get(a).is_some_and(|x| x.usable()))) }
+    /// Usable for trading: valid, and every book of the live windows usable (`books`: this connection's, in the engine).
+    fn ready(&self, books: Option<&Books>, assets: &[&String]) -> bool { self.valid && books.is_some_and(|b| assets.iter().all(|a| b.get(a).is_some_and(|x| x.usable()))) }
 }
 
 /// Order path bench (phase 6): from the decision instant to the last byte of a signed order written, under the
@@ -183,37 +183,6 @@ impl Bench {
         self.sign_us.push((t1.mono_ns - t0.mono_ns) as f64 / 1000.0);
         if token != self.last_token { self.first_us.push(us); self.last_token = token.into(); }
         self.next_ns = t0.mono_ns + BENCH_EVERY_NS;
-    }
-}
-
-/// What the ledger needs of a real order's market to write its trades.
-struct Meta { token: String, market: String, fee_rate: Micro, fee_exponent: u32, end_ms: u64, decided_ns: u64 }
-
-/// Live mode on the hot thread: guards, the orders of this run, and the sender's channel.
-struct Live {
-    armed: live::Armed,
-    guards: Guards,
-    max_orders: u32,
-    tx: mpsc::UnboundedSender<live::ToSend>,
-    orders: Vec<(Meta, Order)>,
-    /// User channel trades of an order whose id is not known yet (the channel may beat the answer), replayed after it.
-    early: Vec<(String, String, engine_core::order::TradeStatus, Micro, Micro)>,
-}
-
-impl Live {
-    /// Orders that may rest at the venue (accepted, nothing matched yet), for the reconciliation.
-    fn resting(&self) -> BTreeSet<String> { self.orders.iter().filter(|(_, o)| o.phase == Phase::Acked).filter_map(|(_, o)| o.id.clone()).collect() }
-
-    /// A trade of the user channel: to its order, and as an accounting fact with the venue's size and price.
-    fn trade(&mut self, order: String, trade: String, status: engine_core::order::TradeStatus, size: Micro, price: Micro, rec: &Rec, acct: &mut Account) {
-        let Some((m, o)) = self.orders.iter_mut().find(|(_, o)| o.id.as_deref() == Some(order.as_str())) else {
-            // not ours, or ours before its answer: kept a while (an account trades rarely)
-            if self.early.len() < 1000 { self.early.push((order, trade, status, size, price)); }
-            return;
-        };
-        let _ = o.apply(Input::Trade { id: trade.clone(), status, size, price });
-        rec.keep(acct, account::Fact::Trade { trade, order, market: m.market.clone(), token: m.token.clone(), dir: account::Dir::Buy, status, size, price,
-            fee_rate: m.fee_rate, fee_exponent: m.fee_exponent, end_ms: m.end_ms });
     }
 }
 
@@ -302,7 +271,7 @@ fn main() {
                                 unresolved.retain(|x| *x != start);
                                 let up_won = o == 0;
                                 let winner = w.tokens[o].clone();
-                                if cold_tx.send(Cold::Resolved { market: w.market, winner, slug: w.slug, up_won, price_to_beat: w.price_to_beat }).is_err() { return; }
+                                if cold_tx.send(Cold::Resolved { market: w.market, winner, up_won, price_to_beat: w.price_to_beat }).is_err() { return; }
                             }
                         }
                     }
@@ -331,9 +300,15 @@ fn main() {
         });
     }).unwrap();
 
+    // the strategies the engine runs: the reference of the paper mode (refused on another horizon than its 300 s)
+    let mut strategies: Vec<Box<dyn engine_app::engine::Strategy>> = vec![];
     let mut paper = cfg.paper.take().map(|p| {
         assert!(cfg.sources.iter().any(|s| s.name == p.strategy.source), "paper: strategy source {} not configured", p.strategy.source);
-        paper::Paper::open(p, clock.clone())
+        assert_eq!(cfg.market.horizon_s, 300, "paper: the reference strategy is built for 5-minute windows");
+        let oracle = cfg.sources.iter().find(|s| s.adapter == "chainlink-rtds").map_or_else(|| "chainlink".to_string(), |s| s.name.clone());
+        let (p, s) = paper::Paper::open(p, clock.clone(), oracle);
+        strategies.push(s);
+        p
     });
     // hot thread: every configured source and connection, books, health, live value of held positions
     let stop_loss = cfg.account.as_ref().map(|a| a.stop_loss).unwrap_or_default();
@@ -342,14 +317,16 @@ fn main() {
     let report = rt.block_on(async {
         let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Out>();
         let mut conns: Vec<Conn> = vec![];
+        // one engine source per connection (SourceId = connection index), named after its configured source
+        let mut engine_sources: Vec<(String, bool)> = vec![];
         for (si, s) in cfg.sources.iter().enumerate() {
             for k in 0..s.connections.max(1) {
                 let (a, has_books) = engine_app::registry::feed_adapter(&s.adapter).unwrap_or_else(|| panic!("unknown adapter {}", s.adapter));
                 let (cmd, cmd_rx) = mpsc::unbounded_channel();
                 let label = if s.connections > 1 { format!("{}#{}", s.name, k + 1) } else { s.name.clone() };
                 tokio::spawn(feed::run(a, conns.len() as SourceId, s.topics.clone(), clock.clone(), cmd_rx, out_tx.clone()));
-                // Polymarket books are probability books: an empty side is announced as 0 (bids) and 1 (asks)
-                conns.push(Conn { label, source: si, cmd, books: has_books.then(|| Books::new(0, engine_core::money::MICRO, 200_000_000)), broken: HashMap::new(),
+                engine_sources.push((s.name.clone(), has_books));
+                conns.push(Conn { label, source: si, cmd, broken: HashMap::new(),
                     valid: false, invalid_since: None, age_ewma: None, recycled_at: None, recycles: 0, msgs: 0, last_recv: None, gaps_ms: Hist::default(), invalid: 0, invalid_ms: vec![], ages_ms: HashMap::new(), failures: HashMap::new() });
             }
         }
@@ -358,24 +335,21 @@ fn main() {
             let (cmd, cmd_rx) = mpsc::unbounded_channel();
             let creds = Creds { key: a.creds.key.clone(), secret: a.creds.secret.clone(), passphrase: a.creds.passphrase.clone() };
             tokio::spawn(feed::run(Box::new(adapter_polymarket::user::User { creds }), conns.len() as SourceId, vec![], clock.clone(), cmd_rx, out_tx.clone()));
-            conns.push(Conn { label: "user".into(), source: cfg.sources.len(), cmd, books: None, broken: HashMap::new(),
+            engine_sources.push(("user".into(), false));
+            conns.push(Conn { label: "user".into(), source: cfg.sources.len(), cmd, broken: HashMap::new(),
                 valid: false, invalid_since: None, age_ewma: None, recycled_at: None, recycles: 0, msgs: 0, last_recv: None, gaps_ms: Hist::default(), invalid: 0, invalid_ms: vec![], ages_ms: HashMap::new(), failures: HashMap::new() });
             conns.len() - 1
         });
+        let mut eng = Engine::new(engine_sources, std::mem::take(&mut strategies)).unwrap_or_else(|e| panic!("engine: {e}"));
+        let mut cmds: Vec<Command> = vec![];
         let armed_flag = Arc::new(std::sync::atomic::AtomicBool::new(armed.is_some()));
         let mut seen_tokens: HashSet<String> = HashSet::new();
         let (mut real, mut done_rx) = match (armed, cfg.live.as_ref()) {
-            (Some(a), Some(l)) => {
-                let (tx, rx) = live::spawn_sender(&a, armed_flag.clone(), clock.clone());
-                let guards = Guards::new(Limits { max_order: l.max_order, session_loss: l.session_loss }, armed_flag.clone());
-                // "orders": 0 arms for the reads only (credentials, balance, user channel): nothing may open
-                guards.stop.store(l.orders == 0, std::sync::atomic::Ordering::Release);
-                (Some(Live { armed: a, guards, max_orders: l.orders, tx, orders: vec![], early: vec![] }), Some(rx))
-            }
+            (Some(a), Some(l)) => { let (v, rx) = live::LiveVenue::new(a, l, armed_flag.clone(), clock.clone()); (Some(v), Some(rx)) }
             _ => (None, None),
         };
         fact(Fact::Boot { connections: conns.iter().map(|c| c.label.clone()).collect() });
-        let book_conns: Vec<usize> = (0..conns.len()).filter(|&i| conns[i].books.is_some()).collect();
+        let book_conns: Vec<usize> = (0..conns.len()).filter(|&i| eng.books[i].is_some()).collect();
         let mut selected: Option<usize> = None;
         let mut used_ages: HashMap<&'static str, Hist> = HashMap::new(); // ages of what the engine uses
         let mut used_ms_without_ready: f64 = 0.0;
@@ -410,7 +384,7 @@ fn main() {
                     let now_s = now.wall_ns / 1_000_000_000;
                     for &i in &book_conns {
                         let c = &mut conns[i];
-                        let quiet = c.books.as_mut().unwrap().quiet(now.mono_ns);
+                        let quiet = eng.books[i].as_mut().unwrap().quiet(now.mono_ns);
                         for (asset, why) in quiet { c.broke(asset, why, now.mono_ns, &fact); }
                         // a requested snapshot that did not come is asked for again
                         let due: Vec<String> = c.broken.iter().filter(|(_, b)| now.mono_ns - b.last_resync >= RESYNC_RETRY_NS).map(|(a, _)| a.clone()).collect();
@@ -418,15 +392,15 @@ fn main() {
                         // finished windows: unsubscribe and forget their books
                         for w in live.iter().filter(|w| w.end + AFTER_END_S < now_s) {
                             let _ = c.cmd.send(Cmd::Unsubscribe(vec![w.up().clone(), w.down().clone()]));
-                            for a in [w.up(), w.down()] { c.books.as_mut().unwrap().remove(a); c.broken.remove(a); }
+                            for a in [w.up(), w.down()] { eng.books[i].as_mut().unwrap().remove(a); c.broken.remove(a); }
                         }
                     }
                     for w in live.iter().filter(|w| w.end + AFTER_END_S < now_s) { fact(Fact::WindowDropped { slug: w.slug.clone() }); }
                     live.retain(|w| w.end + AFTER_END_S >= now_s);
                     // the freshest ready connection is used; switching needs a clear advantage
                     let assets: Vec<&String> = live.iter().filter(|w| w.end > now_s).flat_map(|w| [w.up(), w.down()]).collect();
-                    let best = book_conns.iter().copied().filter(|&i| conns[i].ready(&assets)).min_by(|&a, &b| conns[a].age_ewma.unwrap_or(f64::MAX).total_cmp(&conns[b].age_ewma.unwrap_or(f64::MAX)));
-                    let keep = selected.is_some_and(|s| conns[s].ready(&assets));
+                    let best = book_conns.iter().copied().filter(|&i| conns[i].ready(eng.books[i].as_ref(), &assets)).min_by(|&a, &b| conns[a].age_ewma.unwrap_or(f64::MAX).total_cmp(&conns[b].age_ewma.unwrap_or(f64::MAX)));
+                    let keep = selected.is_some_and(|s| conns[s].ready(eng.books[s].as_ref(), &assets));
                     let switch = match (selected, best) {
                         (_, None) => None,
                         (None, Some(b)) => Some(b),
@@ -436,16 +410,18 @@ fn main() {
                     if let Some(b) = switch {
                         if selected.is_some() { switches += 1; }
                         selected = Some(b);
+                        // the books strategies read are those of the connection in use
+                        for (i, u) in eng.used.iter_mut().enumerate() { *u = i == b; }
                         fact(Fact::Selected { source: cfg.sources[conns[b].source].name.clone(), connection: conns[b].label.clone(), age_ms: conns[b].age_ewma.unwrap_or(0.0) });
                         if let Some(p) = paper.as_mut() {
                             let owned: Vec<String> = assets.iter().map(|a| a.to_string()).collect();
-                            p.switched(conns[b].books.as_ref().unwrap(), &owned, now.mono_ns, now.wall_ns as f64 / 1e6);
+                            p.switched(eng.books[b].as_ref().unwrap(), &owned, now.wall_ns as f64 / 1e6);
                         }
                     }
-                    if let Some(p) = paper.as_mut() {
-                        p.due(now.mono_ns, selected.and_then(|s| conns[s].books.as_ref()), now.wall_ns / 1_000_000);
-                        p.tick(now.mono_ns, now.wall_ns as f64 / 1e6);
-                    }
+                    if let Some(p) = paper.as_mut() { p.due(now.mono_ns, selected.and_then(|s| eng.books[s].as_ref()), now.wall_ns / 1_000_000); }
+                    let t0 = clock.now().mono_ns;
+                    eng.on(EngineInput::Tick, now, &mut cmds);
+                    if let Some(p) = paper.as_mut() { p.after(&cmds, now.mono_ns, (clock.now().mono_ns - t0) as f64 / 1000.0); }
                     if !book_conns.is_empty() && !assets.is_empty() && best.is_none() { used_ms_without_ready += 50.0; }
                 }
                 Some(w) = win_rx.recv() => {
@@ -453,10 +429,14 @@ fn main() {
                     // the opening delay is measured only for windows that open while the engine runs
                     if w.start > boot_s { opens_while_running.insert(w.up().clone(), w.start); opens_while_running.insert(w.down().clone(), w.start); }
                     for &i in &book_conns {
-                        for a in [w.up(), w.down()] { let b = conns[i].books.as_mut().unwrap().entry(a); if b.tick == 0 { b.tick = w.tick; } }
+                        for a in [w.up(), w.down()] { let b = eng.books[i].as_mut().unwrap().entry(a); if b.tick == 0 { b.tick = w.tick; } }
                         let _ = conns[i].cmd.send(Cmd::Subscribe(vec![w.up().clone(), w.down().clone()]));
                     }
-                    if let Some(p) = paper.as_mut() { let now = clock.now(); p.window(&w, now.mono_ns, now.wall_ns as f64 / 1e6); }
+                    if let Some(p) = paper.as_mut() { p.window(&w); }
+                    if let Some(l) = real.as_mut() { l.window(&w); }
+                    let now = clock.now();
+                    eng.on(EngineInput::Window(w.clone()), now, &mut cmds);
+                    if let Some(p) = paper.as_mut() { p.after(&cmds, now.mono_ns, (clock.now().mono_ns - now.mono_ns) as f64 / 1000.0); }
                     if let Some(u) = user_conn { let _ = conns[u].cmd.send(Cmd::Subscribe(vec![w.market.clone()])); }
                     seen_tokens.insert(w.up().clone());
                     seen_tokens.insert(w.down().clone());
@@ -464,8 +444,10 @@ fn main() {
                 }
                 Some(c) = cold_rx.recv() => match c {
                     // only markets the engine traded
-                    Cold::Resolved { market, winner, slug, up_won, price_to_beat } => {
-                        if let Some(p) = paper.as_mut() { let now = clock.now(); p.resolved(&slug, &market, &winner, up_won, price_to_beat, now.mono_ns, now.wall_ns as f64 / 1e6); }
+                    Cold::Resolved { market, winner, up_won, price_to_beat } => {
+                        let now = clock.now();
+                        eng.on(EngineInput::Resolved { market: market.clone(), winner_token: winner.clone(), up_won, price_to_beat }, now, &mut cmds);
+                        if let Some(p) = paper.as_mut() { p.after(&cmds, now.mono_ns, (clock.now().mono_ns - now.mono_ns) as f64 / 1000.0); p.resolved(&market, &winner); }
                         if acct.traded(&market) { rec.keep(&mut acct, account::Fact::Resolved { market, winner }); }
                     }
                     Cold::Account(r) => {
@@ -495,16 +477,15 @@ fn main() {
                     }
                 },
                 Some(d) = recv(&mut done_rx) => if let Some(l) = real.as_mut() {
-                    let live::Done { n, order, sent } = d;
-                    let m = &l.orders[n as usize].0;
-                    fact(Fact::LiveAnswer { n, phase: order.phase, id: order.id.clone(),
-                        decision_to_written_us: sent.written.map(|w| (w.mono_ns - m.decided_ns) as f64 / 1000.0),
-                        written_to_answer_ms: sent.written.zip(sent.answered).map(|(w, a)| (a.mono_ns - w.mono_ns) as f64 / 1e6), late: sent.late,
-                        status: sent.raw.as_ref().map(|r| r.status), body: sent.raw.as_ref().map(|r| String::from_utf8_lossy(&r.body).chars().take(2000).collect()), back_off_s: sent.back_off_s });
-                    if let Some(s) = sent.back_off_s { l.guards.back_off_until_ns = clock.now().mono_ns + s * 1_000_000_000; }
-                    l.orders[n as usize].1 = order;
+                    l.inbox.push(d);
+                    let now = clock.now();
+                    let mut answers = vec![];
+                    l.poll(now, &mut answers);
+                    for f in l.facts.drain(..) { fact(f); }
                     // trades the user channel told before the answer
                     for (o, t, st, size, price) in std::mem::take(&mut l.early) { l.trade(o, t, st, size, price, rec, &mut acct); }
+                    for (at, ev) in answers { eng.on(EngineInput::Venue(ev), at, &mut cmds); }
+                    if let Some(p) = paper.as_mut() { p.after(&cmds, now.mono_ns, 0.0); }
                 },
                 Some(o) = out_rx.recv() => match o {
                     Out::Event(e) if matches!(e.payload, Payload::Fill { .. } | Payload::OrderClosed { .. }) => match (real.as_mut(), e.payload) {
@@ -521,10 +502,10 @@ fn main() {
                                 c.valid = false; c.invalid += 1; c.invalid_since.get_or_insert(at.mono_ns);
                                 // changes may have been lost while the connection was down: books restart empty and
                                 // become usable again only with their new snapshot
-                                if c.books.is_some() {
-                                    let mut fresh = Books::new(0, engine_core::money::MICRO, 200_000_000);
+                                if eng.books[source as usize].is_some() {
+                                    let mut fresh = engine_app::engine::new_books();
                                     for w in &live { for a in [w.up(), w.down()] { fresh.entry(a).tick = w.tick; } }
-                                    c.books = Some(fresh); c.broken.clear();
+                                    eng.books[source as usize] = Some(fresh); c.broken.clear();
                                 }
                             }
                             Health::Valid => { c.valid = true; if let Some(t) = c.invalid_since.take() {
@@ -540,7 +521,8 @@ fn main() {
                         let k = kind(&e.payload);
                         let is_quote = k == "quote";
                         let age = e.event_ms.filter(|_| k != "book").map(|ms| (e.recv.wall_ns as f64 / 1e6) - ms as f64);
-                        let used = conns[ci].books.is_none() || selected == Some(ci);
+                        let has_books = eng.books[ci].is_some();
+                        let used = !has_books || selected == Some(ci);
                         // books of held positions (or of the bench's) this event changes; nothing is allocated otherwise
                         let mut touched: Vec<String> = if used && (!acct.open.is_empty() || bench.is_some()) { match &e.payload {
                             Payload::BookSnapshot { asset, .. } | Payload::TickChange { asset, .. } => vec![asset.clone()],
@@ -561,7 +543,7 @@ fn main() {
                             c.ages_ms.entry(k).or_default().push(a);
                             if k == "delta" { c.age_ewma = Some(c.age_ewma.map_or(a, |x| x + EWMA * (a - x))); }
                             // far behind: replace the connection instead of draining its backlog
-                            if a > SLOW_MS && other_fresh && c.books.is_some() && c.recycled_at.is_none_or(|t| e.recv.mono_ns - t >= RECYCLE_COOLDOWN_NS) {
+                            if a > SLOW_MS && other_fresh && has_books && c.recycled_at.is_none_or(|t| e.recv.mono_ns - t >= RECYCLE_COOLDOWN_NS) {
                                 c.recycled_at = Some(e.recv.mono_ns); c.recycles += 1; c.valid = false; c.age_ewma = None;
                                 let _ = c.cmd.send(Cmd::Resync);
                                 fact(Fact::ConnectionRecycled { connection: c.label.clone(), age_ms: a });
@@ -570,43 +552,40 @@ fn main() {
                         }
                         let now_ns = e.recv.mono_ns;
                         // paper: orders due are matched on the books as they were just before this event
-                        let paper_ev = paper.as_mut().map(|p| { p.due(now_ns, selected.and_then(|s| conns[s].books.as_ref()), e.recv.wall_ns / 1_000_000); e.clone() });
+                        let paper_ev = paper.as_mut().map(|p| { p.due(now_ns, selected.and_then(|s| eng.books[s].as_ref()), e.recv.wall_ns / 1_000_000); p.observe(&e, used && has_books); e.clone() });
+                        let (recv, event_ms) = (e.recv, e.event_ms);
+                        // the engine: books of this connection, then the strategies (on the books in use)
+                        eng.on(EngineInput::Feed(e), recv, &mut cmds);
+                        let us = (clock.now().mono_ns - recv.mono_ns) as f64 / 1000.0;
                         let c = &mut conns[ci];
-                        let mut broke: Vec<(String, Integrity)> = vec![];
-                        if let Some(books) = c.books.as_mut() {
-                            match e.payload {
-                                Payload::BookSnapshot { asset, bids, asks, tick } => match books.snapshot(&asset, &bids, &asks, tick) {
-                                    Err(why) => broke.push((asset, why)),
-                                    Ok(()) => {
-                                        if let Some(b) = c.broken.remove(&asset) {
-                                            let ms = (clock.now().mono_ns - b.since) as f64 / 1e6;
-                                            recovered.push(ms);
-                                            fact(Fact::BookRecovered { connection: c.label.clone(), asset: asset.clone(), ms_unusable: ms });
-                                        }
-                                        if let Some(start) = opens_while_running.remove(&asset) {
-                                            let ms = (e.recv.wall_ns / 1_000_000) as i64 - (start as i64) * 1000;
-                                            first_usable_ms.push(ms as f64);
-                                            fact(Fact::BookUsable { asset, ms_after_open: ms });
-                                        }
+                        for (asset, r) in std::mem::take(&mut eng.book_changes) {
+                            match r {
+                                Err(why) => c.broke(asset, why, now_ns, &fact),
+                                Ok(()) => {
+                                    if let Some(b) = c.broken.remove(&asset) {
+                                        let ms = (clock.now().mono_ns - b.since) as f64 / 1e6;
+                                        recovered.push(ms);
+                                        fact(Fact::BookRecovered { connection: c.label.clone(), asset: asset.clone(), ms_unusable: ms });
                                     }
-                                },
-                                Payload::BookDelta { changes } => broke.extend(books.delta(e.event_ms.unwrap_or(0), &changes, now_ns)),
-                                Payload::TickChange { asset, tick } => { books.tick_changed(&asset, tick); broke.push((asset, Integrity::TickChanged)); }
-                                _ => {}
+                                    if let Some(start) = opens_while_running.remove(&asset) {
+                                        let ms = (recv.wall_ns / 1_000_000) as i64 - (start as i64) * 1000;
+                                        first_usable_ms.push(ms as f64);
+                                        fact(Fact::BookUsable { asset, ms_after_open: ms });
+                                    }
+                                }
                             }
                         }
-                        for (asset, why) in broke { c.broke(asset, why, now_ns, &fact); }
                         if let (Some(p), Some(pe)) = (paper.as_mut(), paper_ev) {
-                            let s = &cfg.sources[conns[ci].source];
-                            p.event(&s.name, s.adapter == "chainlink-rtds", used && conns[ci].books.is_some(), &pe, conns[ci].books.as_ref());
+                            p.after(&cmds, now_ns, us);
+                            p.revalue(&pe, eng.books[ci].as_ref());
                         }
                         // live value of held positions on each change of their book, and the stop loss on it (02-conception.md §6)
-                        let now_ms = e.recv.wall_ns / 1_000_000;
-                        let age = e.event_ms.map_or(0, |ms| now_ms as i64 - ms as i64);
+                        let now_ms = recv.wall_ns / 1_000_000;
+                        let age = event_ms.map_or(0, |ms| now_ms as i64 - ms as i64);
                         for token in &touched {
                             let Some(p) = acct.open.get(token) else { continue };
                             let t0 = clock.now().mono_ns;
-                            let Some(v) = value(p, conns[ci].books.as_ref().and_then(|b| b.get(token)), age) else { continue };
+                            let Some(v) = value(p, eng.books[ci].as_ref().and_then(|b| b.get(token)), age) else { continue };
                             let trig = !fired.contains(token) && stop_loss.triggers(&v, now_ms, p.end_ms);
                             value_us.push((clock.now().mono_ns - t0) as f64 / 1000.0);
                             if trig {
@@ -616,60 +595,33 @@ fn main() {
                             if last_value.insert(token.clone(), v.value) != Some(v.value) { fact(Fact::Valuation { valuation: v }); }
                         }
                         // engine latency: from the frame's receive stamp to the state (live values included) being up to date
-                        engine_us.push((clock.now().mono_ns - e.recv.mono_ns) as f64 / 1000.0);
+                        engine_us.push((clock.now().mono_ns - recv.mono_ns) as f64 / 1000.0);
                         // bench: the same valuation on a 10-share position of the bench's token, measured under the real load
                         if let (Some(b), Some(w)) = (bench.as_mut(), live.iter().find(|w| w.end * 1000 > now_ms)) {
                             if touched.contains(w.up()) {
                                 let p = account::Position { market: w.market.clone(), token: w.up().clone(), shares: 10_000_000, paid: 5_000_000, fees: 0, fees_measured: false, sold: 0, confirmed: false,
                                     won: None, fee_rate: w.fee.rate, fee_exponent: w.fee.exponent, end_ms: w.end * 1000, seqs: vec![] };
                                 let t0 = clock.now().mono_ns;
-                                if let Some(v) = value(&p, conns[ci].books.as_ref().and_then(|x| x.get(w.up())), age) { let _ = stop_loss.triggers(&v, now_ms, p.end_ms); b.value_us.push((clock.now().mono_ns - t0) as f64 / 1000.0); }
+                                if let Some(v) = value(&p, eng.books[ci].as_ref().and_then(|x| x.get(w.up())), age) { let _ = stop_loss.triggers(&v, now_ms, p.end_ms); b.value_us.push((clock.now().mono_ns - t0) as f64 / 1000.0); }
                             }
                         }
                         if let (Some(b), Some(w)) = (bench.as_mut(), live.iter().find(|w| w.end > clock.now().wall_ns / 1_000_000_000)) {
-                            if is_quote && e.recv.mono_ns >= b.next_ns { b.order(&w.up().clone(), w.tick, &clock).await; }
+                            if is_quote && recv.mono_ns >= b.next_ns { b.order(&w.up().clone(), w.tick, &clock).await; }
                         }
                     }
                 },
             }
-            // live: each strategy decision past the guards becomes a real order, signed here, written by the sender
-            let decided = paper.as_mut().map(|p| std::mem::take(&mut p.decided)).unwrap_or_default();
+            // live: each engine command goes to the real venue, which refuses all but FAK buys past the guards
             if let Some(l) = real.as_mut() {
-                for d in decided {
-                    let now = clock.now();
-                    let Some(w) = live.iter().find(|w| w.tokens.contains(&d.token)) else { fact(Fact::LiveRefused { slug: d.slug, why: "market unknown".into() }); continue };
-                    // shortcut: buys only (the reference holds to settlement, exit "hold"); a sell would need the held size checked
-                    if !d.buy { fact(Fact::LiveRefused { slug: d.slug, why: "sell not sent".into() }); continue; }
-                    let ctx = Context {
-                        sources_valid: selected.is_some() && conns.iter().filter(|c| c.source < cfg.sources.len() && Some(&cfg.sources[c.source].name) == strategy_source.as_ref()).all(|c| c.valid),
-                        order_pending: l.orders.iter().any(|(_, o)| o.blocks_openings()),
-                        reconciled: verdict.as_ref().is_some_and(|v| v.agrees()),
-                        clock_synced: l.armed.clock_synced,
-                        prepared: w.end * 1_000_000_000 > now.wall_ns,
-                        // shortcut: realized only; the latent part waits for a run with more than a few orders
-                        session_pnl: acct.realized_total(),
-                        now_ns: now.mono_ns,
-                    };
-                    if let Err(r) = l.guards.check_open(d.maker as Micro, &ctx) { fact(Fact::LiveRefused { slug: d.slug, why: format!("{r:?}") }); continue; }
-                    // trading goes on while the wallet can pay: the last balance read must cover the order
-                    if acct.balance.is_none_or(|(b, _)| b < d.maker as Micro) { fact(Fact::LiveRefused { slug: d.slug, why: format!("balance {:?} < {}", acct.balance.map(|b| b.0), d.maker) }); continue; }
-                    let o = sign::Order { salt: (now.wall_ns / 1000) & ((1 << 53) - 1), token_id: d.token.clone(), maker_amount: d.maker, taker_amount: d.taker, side: sign::Side::Buy, timestamp_ms: now.wall_ns / 1_000_000 };
-                    let hash = l.armed.signer.order_hash(&o);
-                    let body = l.armed.signer.body(&o, &l.armed.creds.key);
-                    let req = match clob::order_request(HOST, &l.armed.signer, &l.armed.creds, &body, now.wall_ns / 1_000_000_000) {
-                        Ok(r) => r,
-                        Err(e) => { fact(Fact::LiveRefused { slug: d.slug, why: format!("{e:?}") }); continue }
-                    };
-                    let mut order = Order::default();
-                    let _ = order.apply(Input::Signed);
-                    let n = l.orders.len() as u32;
-                    fact(Fact::LiveOrder { n, slug: d.slug, token: d.token.clone(), limit: d.limit, maker: d.maker, taker: d.taker, hash: hash.clone() });
-                    l.orders.push((Meta { token: d.token, market: w.market.clone(), fee_rate: w.fee.rate, fee_exponent: w.fee.exponent, end_ms: w.end * 1000, decided_ns: now.mono_ns }, order.clone()));
-                    // the count of this run: once reached, the stop refuses every further opening
-                    if l.orders.len() as u32 >= l.max_orders { l.guards.stop.store(true, std::sync::atomic::Ordering::Release); }
-                    let _ = l.tx.send(live::ToSend { n, order, req, hash });
-                }
+                l.sources_valid = selected.is_some() && conns.iter().filter(|c| c.source < cfg.sources.len() && Some(&cfg.sources[c.source].name) == strategy_source.as_ref()).all(|c| c.valid);
+                l.reconciled = verdict.as_ref().is_some_and(|v| v.agrees());
+                l.session_pnl = acct.realized_total();
+                l.balance = acct.balance.map(|b| b.0);
+                for (_, d, why) in eng.refused.drain(..) { if let Decision::Place(i) = d { fact(Fact::LiveRefused { slug: String::new(), why: format!("{why} (token {})", i.token) }); } }
+                for c in cmds.drain(..) { l.submit(c, clock.now()); for f in l.facts.drain(..) { fact(f); } }
             }
+            cmds.clear();
+            eng.refused.clear();
         }
         let per_conn: serde_json::Map<String, serde_json::Value> = conns.iter_mut().map(|c| (c.label.clone(), serde_json::json!({
             "msgs": c.msgs, "interval_ms": c.gaps_ms.dist(), "invalid_transitions": c.invalid, "recycles": c.recycles, "invalid_ms": dist(&mut c.invalid_ms), "integrity_failures": c.failures,

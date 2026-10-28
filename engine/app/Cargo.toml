@@ -13,6 +13,8 @@ engine-core = { path = "../core" }
 adapter-polymarket = { path = "../adapters/polymarket" }
 adapter-chainlink = { path = "../adapters/chainlink" }
 adapter-okx = { path = "../adapters/okx" }
+adapter-binance = { path = "../adapters/binance" }
+adapter-coinbase = { path = "../adapters/coinbase" }
 engine-strategy = { path = "../strategy" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
