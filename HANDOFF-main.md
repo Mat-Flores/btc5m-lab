@@ -16,13 +16,13 @@
 - Le `.jsonl.gz` source de la session `2026-10-16T01-17-20_dublin` est tronqué (sans effet sur la parité). `replay.sh` depuis Git Bash : préfixer `MSYS_NO_PATHCONV=1`.
 
 ## Reste à faire (dans l'ordre)
-2. Resserrer le test `source-tracing` `example_config_is_valid_and_complete` (il tolère l'absence des 3 nouveaux adapters).
 3. Vague 2b en parallèle : `backtest/` (opus/high : SimVenue, boucle déterministe, non-régression maker 0 écart, E1, `config/default.json` E2) ; `ui/` (sonnet/high via skill `impeccable:impeccable` ; activer `"impeccable@impeccable": true` dans `.claude/settings.local.json`, déjà gitignoré ; s'il ne se charge pas : STOP et demander) ; les 8 README + README racine (sonnet/medium).
 4. Phase 3 : 3a recopie des 2 sessions en cours + copie du `data/` local + conversion (`node source-tracing/convert/convert.mjs --out source-tracing/trace <entrées>`) + vérif sha256 → **STOP 3b obligatoire** (bilan + ce qui sera arrêté/supprimé sur chaque nœud, attendre l'accord) → 3c nettoyage → 3d déploiement dry-run.
 5. Phase 4 (vérifications), `graphify .`, rapport final.
 
 ## Décisions et pièges
 - Réponses utilisateur (2026-10-28) : (a) historique git laissé tel quel, pas de reset ; (b) garder SA version de `CLAUDE.md`, noter l'écart `diff CLAUDE.md` dans le rapport final de phase 4.
+- Signal backtest (validé 2026-10-28) : source configurable, défaut binance-spot ms avec sigmaMult 1,3 ; moyenne Binance+Coinbase = option à tester ; OKX reste enregistré (flux enregistré creux, LT-REF invalidé).
 - dublin-live (3.253.60.148) : trader réel armé sur okx + wallet `/home/ubuntu/p10/wallet`. NEVER rien y déployer ; nettoyage seulement après STOP 3b, arrêt propre (sell-only, positions à plat) et accord nominatif sur le wallet (D8). NEVER éteindre une instance EC2.
 - Purge cron 14 j sur les 2 serveurs (1re le 2026-10-31 ~06:25 UTC) : déjà sauvegardé (D1), seules les sessions en cours restent à recopier.
 - Gratuit uniquement (D3) : trace Polymarket ≈ 4 Go/jour sur un disque de 30 Go → `pull-traces` quotidien + garde disque du tracer.
@@ -42,4 +42,4 @@
 - Oracle maker (≈22 min, dans `btc5m-lag-sim`, lecture seule) : `node --max-old-space-size=8192 engine/maker-bt/validate.mjs --delay 0 --sim exact` → 59695 ordres, ratio 1.044, exacts 0.841, PnL 16581 $ / 17331 $.
 
 ## Prochaine action
-Faire l'étape « Resserrer le test source-tracing » (exiger binance-spot, binance-perp, coinbase dans `example_config_is_valid_and_complete`).
+Lancer la vague 2b (voir « Reste à faire ») : backtest/ avec signal binance-spot configurable par défaut, ui/, README. Constantes de stratégie engine : proposé de les traiter dans backtest/ (réponse utilisateur en attente).

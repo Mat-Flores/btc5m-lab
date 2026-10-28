@@ -282,9 +282,7 @@ fn frames_are_classified() {
 #[test]
 fn example_config_is_valid_and_complete() {
     let text = include_str!("../config.example.json");
-    let c: Config = serde_json::from_str(text).unwrap();
-    // les adapters binance-spot, binance-perp et coinbase (D2) viennent de l'engine : tant qu'ils manquent au registre, seul ce refus est toléré
-    if let Err(e) = Config::parse(text) { assert!(e.contains("adapter inconnu binance") || e.contains("adapter inconnu coinbase"), "{e}"); }
+    let c = Config::parse(text).unwrap();
     let names: Vec<&str> = c.sources.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["polymarket-clob", "polymarket-gamma", "polymarket-clob-time", "chainlink-rtds", "okx-btc-usdt-swap", "binance-btcusdt", "binance-perp-btcusdt", "coinbase-btc-usd"]);
     assert_eq!((c.market.asset.as_str(), c.market.horizon_s), ("btc", 300));
