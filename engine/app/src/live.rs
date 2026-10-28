@@ -3,7 +3,7 @@
 //! <v1 encrypted key>`, `src/exec/wallets.js`) from a file only its owner can read, and the passphrase from the first
 //! line of stdin; the key lives in memory only. Orders go out on a task of their own, so the hot thread never waits
 //! for the venue.
-use super::{Fact, Rec};
+use super::{Fact, Rec, Runtime};
 use adapter_polymarket::exec::{self, Clob, Creds, Sent, ALLOWED, HOST};
 use adapter_polymarket::sign::{self, Signer};
 use engine_app::engine::{Amount, Command, Tif, Venue, VenueEvent};
@@ -52,7 +52,7 @@ pub fn wallet_line(text: &str) -> Result<(String, String), &'static str> {
 }
 
 /// Decrypts the key and gets the account's API credentials. Panics with a message that says nothing of the key.
-pub fn arm(cfg: &LiveCfg) -> Armed {
+pub fn arm(cfg: &LiveCfg, http_timeout: Duration) -> Armed {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -68,7 +68,7 @@ pub fn arm(cfg: &LiveCfg) -> Armed {
     let signer = Arc::new(Signer::from_bytes(&key, &wallet).expect("live: key"));
     drop(key);
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-    let creds = rt.block_on(derive_creds(&signer)).unwrap_or_else(|e| panic!("live: API credentials: {e}"));
+    let creds = rt.block_on(derive_creds(&signer, http_timeout)).unwrap_or_else(|e| panic!("live: API credentials: {e}"));
     let clock_synced = std::process::Command::new("timedatectl").args(["show", "-p", "NTPSynchronized", "--value"]).output()
         .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "yes");
     Armed { signer, creds: Arc::new(creds), clock_synced }
@@ -76,11 +76,11 @@ pub fn arm(cfg: &LiveCfg) -> Armed {
 
 /// `GET /auth/derive-api-key` (L1): the account's existing credentials, as the SDK's `createOrDeriveApiKey` falls back to.
 // shortcut: derive only, no creation (POST /auth/api-key); an account that never had credentials stops here
-async fn derive_creds(s: &Signer) -> Result<Creds, String> {
+async fn derive_creds(s: &Signer, timeout: Duration) -> Result<Creds, String> {
     let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     let req = format!("GET /auth/derive-api-key HTTP/1.1\r\nHost: {HOST}\r\n{}\r\n", s.l1_headers(ts));
     let mut clob = Clob::new(HOST, 443, true, NetGuard::new(&ALLOWED, Arc::new(AtomicBool::new(false))));
-    let r = clob.get(req.as_bytes(), Duration::from_secs(5)).await.map_err(|e| format!("{e:?}"))?;
+    let r = clob.get(req.as_bytes(), timeout).await.map_err(|e| format!("{e:?}"))?;
     exec::read_creds(&r).ok_or_else(|| format!("HTTP {}", r.status))
 }
 
@@ -90,30 +90,32 @@ pub struct ToSend { pub n: u32, pub order: Order, pub req: Vec<u8>, pub hash: St
 pub struct Done { pub n: u32, pub order: Order, pub sent: Sent }
 
 /// The sender task: one warm connection, kept alive off the hot path; an unknown order is queried, never resent.
-pub fn spawn_sender(a: &Armed, armed: Arc<AtomicBool>, clock: Arc<Clock>) -> (mpsc::UnboundedSender<ToSend>, mpsc::UnboundedReceiver<Done>) {
+pub fn spawn_sender(a: &Armed, armed: Arc<AtomicBool>, clock: Arc<Clock>, t: &Runtime) -> (mpsc::UnboundedSender<ToSend>, mpsc::UnboundedReceiver<Done>) {
     let (tx, mut rx) = mpsc::unbounded_channel::<ToSend>();
     let (done_tx, done_rx) = mpsc::unbounded_channel::<Done>();
     let (signer, creds) = (a.signer.clone(), a.creds.clone());
+    let ms = Duration::from_millis;
+    let (query_every, query_tries, query_timeout, warm_every) = (ms(t.order_query_every_ms), t.order_query_tries, ms(t.order_query_timeout_ms), Duration::from_secs(t.warm_every_s));
+    let mut clob = Clob::new(HOST, 443, true, NetGuard::new(&ALLOWED, armed));
+    // measured on real orders (2026-10-21/22): the venue answers 0.87 to 3.5 s after the write, past the 300 ms of
+    // the design; waiting longer keeps a merely slow order from passing through "unknown"
+    (clob.deadline, clob.grace, clob.warm_timeout, clob.back_off_s) = (ms(t.order_answer_ms), ms(t.order_grace_ms), ms(t.warm_timeout_ms), t.back_off_s);
     tokio::spawn(async move {
-        let mut clob = Clob::new(HOST, 443, true, NetGuard::new(&ALLOWED, armed));
-        // measured on real orders (2026-10-21/22): the venue answers 0.87 to 3.5 s after the write, past the 300 ms of
-        // the design; waiting longer keeps a merely slow order from passing through "unknown"
-        clob.deadline = Duration::from_secs(5);
         let _ = clob.warm().await;
-        let mut keep = tokio::time::interval(Duration::from_secs(20));
+        let mut keep = tokio::time::interval(warm_every);
         loop {
             tokio::select! {
                 m = rx.recv() => {
                     let Some(ToSend { n, mut order, req, hash }) = m else { return };
                     let sent = clob.post(&req, &mut order, &clock).await;
                     let id = order.id.clone().unwrap_or(hash);
-                    // what the answer did not say, a query may: every 2 s for a minute, then the order stays unknown
-                    for _ in 0..30 {
+                    // what the answer did not say, a query may: every 2 s for a minute (defaults), then the order stays unknown
+                    for _ in 0..query_tries {
                         if order.phase != Phase::Unknown { break; }
-                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        tokio::time::sleep(query_every).await;
                         let ts = clock.now().wall_ns / 1_000_000_000;
                         let Ok(q) = exec::query_request(HOST, &signer, &creds, &id, ts) else { break };
-                        if let Ok(r) = clob.get(&q, Duration::from_secs(2)).await { for i in exec::read_order(&r, &id) { let _ = order.apply(i); } }
+                        if let Ok(r) = clob.get(&q, query_timeout).await { for i in exec::read_order(&r, &id) { let _ = order.apply(i); } }
                     }
                     if done_tx.send(Done { n, order, sent }).is_err() { return; }
                 }
@@ -141,6 +143,8 @@ pub struct LiveVenue {
     /// User channel trades of an order whose id is not known yet (the channel may beat the answer), replayed after it.
     pub early: Vec<(String, String, TradeStatus, Micro, Micro)>,
     windows: Vec<Window>,
+    windows_kept_s: u64,
+    early_max: usize,
     pub sources_valid: bool,
     pub reconciled: bool,
     pub session_pnl: Micro,
@@ -152,16 +156,16 @@ pub struct LiveVenue {
 }
 
 impl LiveVenue {
-    pub fn new(a: Armed, l: &LiveCfg, armed: Arc<AtomicBool>, clock: Arc<Clock>) -> (LiveVenue, mpsc::UnboundedReceiver<Done>) {
-        let (tx, rx) = spawn_sender(&a, armed.clone(), clock);
+    pub fn new(a: Armed, l: &LiveCfg, armed: Arc<AtomicBool>, clock: Arc<Clock>, t: &Runtime) -> (LiveVenue, mpsc::UnboundedReceiver<Done>) {
+        let (tx, rx) = spawn_sender(&a, armed.clone(), clock, t);
         let guards = Guards::new(Limits { max_order: l.max_order, session_loss: l.session_loss }, armed);
         // "orders": 0 arms for the reads only (credentials, balance, user channel): nothing may open
         guards.stop.store(l.orders == 0, std::sync::atomic::Ordering::Release);
-        (LiveVenue { armed: a, guards, max_orders: l.orders, tx, orders: vec![], engine_n: vec![], early: vec![], windows: vec![], sources_valid: false, reconciled: false,
+        (LiveVenue { armed: a, guards, max_orders: l.orders, tx, orders: vec![], engine_n: vec![], early: vec![], windows: vec![], windows_kept_s: t.windows_kept_s, early_max: t.early_trades_max, sources_valid: false, reconciled: false,
             session_pnl: 0, balance: None, facts: vec![], inbox: vec![] }, rx)
     }
 
-    pub fn window(&mut self, w: &Window) { self.windows.push(w.clone()); let last = w.start; self.windows.retain(|x| x.start + 3600 > last); }
+    pub fn window(&mut self, w: &Window) { self.windows.push(w.clone()); let last = w.start; self.windows.retain(|x| x.start + self.windows_kept_s > last); }
 
     /// Orders that may rest at the venue (accepted, nothing matched yet), for the reconciliation.
     pub fn resting(&self) -> BTreeSet<String> { self.orders.iter().filter(|(_, o)| o.phase == Phase::Acked).filter_map(|(_, o)| o.id.clone()).collect() }
@@ -170,7 +174,7 @@ impl LiveVenue {
     pub fn trade(&mut self, order: String, trade: String, status: TradeStatus, size: Micro, price: Micro, rec: &Rec, acct: &mut Account) {
         let Some((m, o)) = self.orders.iter_mut().find(|(_, o)| o.id.as_deref() == Some(order.as_str())) else {
             // not ours, or ours before its answer: kept a while (an account trades rarely)
-            if self.early.len() < 1000 { self.early.push((order, trade, status, size, price)); }
+            if self.early.len() < self.early_max { self.early.push((order, trade, status, size, price)); }
             return;
         };
         let _ = o.apply(Input::Trade { id: trade.clone(), status, size, price });
@@ -230,7 +234,7 @@ impl Venue for LiveVenue {
                 written_to_answer_ms: sent.written.zip(sent.answered).map(|(w, a)| (a.mono_ns - w.mono_ns) as f64 / 1e6), late: sent.late,
                 status: sent.raw.as_ref().map(|r| r.status), body: sent.raw.as_ref().map(|r| String::from_utf8_lossy(&r.body).chars().take(2000).collect()), back_off_s: sent.back_off_s });
             if let Some(s) = sent.back_off_s { self.guards.back_off_until_ns = until.mono_ns + s * 1_000_000_000; }
-            let input = sent.raw.as_ref().map_or(Input::NoAnswer, |r| exec::read_answer(r).input);
+            let input = sent.raw.as_ref().map_or(Input::NoAnswer, |r| exec::read_answer(r, 0).input); // only the input is read, not the back-off
             self.orders[n as usize].1 = order;
             out.push((until, VenueEvent::Answer { n: self.engine_n[n as usize], input }));
         }

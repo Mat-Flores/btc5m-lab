@@ -27,7 +27,7 @@ async fn main() {
     let req = format!("GET /auth/derive-api-key HTTP/1.1\r\nHost: {HOST}\r\n{}\r\n", s.l1_headers(now_s()));
     let creds = exec::read_creds(&clob.get(req.as_bytes(), Duration::from_secs(5)).await.unwrap()).expect("creds");
     let m = engine_core::market::MarketSpec { venue: "polymarket".into(), asset: "btc".into(), horizon_s: 300 };
-    let w = windows::fetch(&m, m.window_start(now_s())).await.unwrap().expect("window");
+    let w = windows::fetch(&m, m.window_start(now_s()), Duration::from_secs(5)).await.unwrap().expect("window");
     println!("window {} tick {}", w.slug, w.tick);
     for _ in 0..5 {
         let t0 = clock.now().mono_ns;

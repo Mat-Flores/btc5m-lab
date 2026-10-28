@@ -86,18 +86,23 @@ pub struct Engine {
     /// Decisions refused here (unknown market, amounts not computable), with why.
     pub refused: Vec<(u16, Decision, String)>,
     buf: Vec<Decision>,
+    /// A book change left unconfirmed this long is checked (`Books::quiet`).
+    pub book_quiet_ns: u64,
+    /// A window's metadata is kept this long after the start of the latest one, for its late orders and its result.
+    pub windows_kept_s: u64,
 }
 
 /// Polymarket books are probability books: an empty side is announced as 0 (bids) and 1 (asks).
-pub fn new_books() -> Books { Books::new(0, engine_core::money::MICRO, 200_000_000) }
+pub fn new_books(quiet_ns: u64) -> Books { Books::new(0, engine_core::money::MICRO, quiet_ns) }
 
 impl Engine {
     /// `sources`: per SourceId, its name and whether it carries books.
-    pub fn new(sources: Vec<(String, bool)>, strategies: Vec<Box<dyn Strategy>>) -> Result<Engine, String> {
+    /// `book_quiet_ns`, `windows_kept_s`: see the fields (engine config `runtime`: 200 ms, 3600 s).
+    pub fn new(sources: Vec<(String, bool)>, strategies: Vec<Box<dyn Strategy>>, book_quiet_ns: u64, windows_kept_s: u64) -> Result<Engine, String> {
         for s in &strategies { for n in s.sources() { if !sources.iter().any(|(x, _)| *x == n) { return Err(format!("strategy source {n} not configured")); } } }
-        let books = sources.iter().map(|(_, b)| b.then(new_books)).collect();
+        let books = sources.iter().map(|(_, b)| b.then(|| new_books(book_quiet_ns))).collect();
         let used = vec![false; sources.len()];
-        Ok(Engine { sources: sources.into_iter().map(|s| s.0).collect(), books, used, strategies, windows: vec![], orders: vec![], book_changes: vec![], refused: vec![], buf: vec![] })
+        Ok(Engine { sources: sources.into_iter().map(|s| s.0).collect(), books, used, strategies, windows: vec![], orders: vec![], book_changes: vec![], refused: vec![], buf: vec![], book_quiet_ns, windows_kept_s })
     }
 
     pub fn stats(&self) -> Vec<Vec<(&'static str, f64)>> { self.strategies.iter().map(|s| s.stats()).collect() }
@@ -118,8 +123,8 @@ impl Engine {
             EngineInput::Window(w) => {
                 // known before the strategies hear of it: an order decided now names its market
                 if !self.windows.iter().any(|x| x.start == w.start) { self.windows.push(w.clone()); }
-                // a finished window's metadata is kept an hour, for its late orders and its result
-                if let Some(last) = self.windows.iter().map(|x| x.start).max() { self.windows.retain(|x| x.start + 3600 > last); }
+                        // a finished window's metadata is kept a while, for its late orders and its result
+                if let Some(last) = self.windows.iter().map(|x| x.start).max() { self.windows.retain(|x| x.start + self.windows_kept_s > last); }
                 for i in 0..self.strategies.len() { self.strategies[i].on_window(&w, at, &mut self.buf); self.emit(i, out); }
             }
             EngineInput::Resolved { market, up_won, price_to_beat, .. } => {
@@ -215,8 +220,8 @@ mod tests {
 
     #[test]
     fn decisions_become_numbered_priced_commands() {
-        assert!(Engine::new(vec![("b".into(), false)], vec![Box::new(Probe { placed: vec![], venue: vec![], next: 0 })]).is_err());
-        let mut e = Engine::new(vec![("a".into(), true)], vec![Box::new(Probe { placed: vec![], venue: vec![], next: 0 })]).unwrap();
+        assert!(Engine::new(vec![("b".into(), false)], vec![Box::new(Probe { placed: vec![], venue: vec![], next: 0 })], 200_000_000, 3600).is_err());
+        let mut e = Engine::new(vec![("a".into(), true)], vec![Box::new(Probe { placed: vec![], venue: vec![], next: 0 })], 200_000_000, 3600).unwrap();
         let mut out = vec![];
         e.on(EngineInput::Window(window()), AT, &mut out);
         // the reference's own amounts for 93.457943 $ at 0.55 (strategy/src/reference.rs test): the signer's are equal

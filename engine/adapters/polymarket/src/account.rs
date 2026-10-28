@@ -11,9 +11,6 @@ use serde_json::Value;
 use std::time::Duration;
 
 pub const DATA: &str = "https://data-api.polymarket.com";
-const TIMEOUT: Duration = Duration::from_secs(5);
-/// A cursor that never ends would loop: an account holds far fewer rows than this.
-const MAX_PAGES: usize = 20;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Holding {
@@ -60,10 +57,11 @@ pub fn read_redemptions(body: &[u8]) -> Result<(Vec<Redemption>, Option<String>)
     Ok((out, next))
 }
 
-async fn all<T>(url: impl Fn(Option<&str>) -> String, read: fn(&[u8]) -> Result<(Vec<T>, Option<String>), String>) -> Result<Vec<T>, String> {
+/// `max_pages`: a cursor that never ends would loop; an account holds far fewer rows than that many pages.
+async fn all<T>(url: impl Fn(Option<&str>) -> String, read: fn(&[u8]) -> Result<(Vec<T>, Option<String>), String>, timeout: Duration, max_pages: usize) -> Result<Vec<T>, String> {
     let (mut out, mut cursor) = (vec![], None);
-    for _ in 0..MAX_PAGES {
-        let body = http::get(&url(cursor.as_deref()), TIMEOUT).await.map_err(|e| format!("data-api: {e:?}"))?;
+    for _ in 0..max_pages {
+        let body = http::get(&url(cursor.as_deref()), timeout).await.map_err(|e| format!("data-api: {e:?}"))?;
         let (rows, next) = read(&body)?;
         out.extend(rows);
         match next { Some(c) => cursor = Some(c), None => return Ok(out) }
@@ -74,10 +72,10 @@ async fn all<T>(url: impl Fn(Option<&str>) -> String, read: fn(&[u8]) -> Result<
 fn cursor(c: Option<&str>) -> String { c.map(|c| format!("&cursor={c}")).unwrap_or_default() }
 
 /// Every holding of the address (`user`: the wallet that holds the shares).
-pub async fn holdings(user: &str) -> Result<Vec<Holding>, String> { all(|c| format!("{DATA}/v2/positions?user={user}&limit=500{}", cursor(c)), read_holdings).await }
+pub async fn holdings(user: &str, timeout: Duration, max_pages: usize) -> Result<Vec<Holding>, String> { all(|c| format!("{DATA}/v2/positions?user={user}&limit=500{}", cursor(c)), read_holdings, timeout, max_pages).await }
 
 /// Every redemption of the address.
-pub async fn redemptions(user: &str) -> Result<Vec<Redemption>, String> { all(|c| format!("{DATA}/v2/activity?user={user}&type=REDEEM&limit=500{}", cursor(c)), read_redemptions).await }
+pub async fn redemptions(user: &str, timeout: Duration, max_pages: usize) -> Result<Vec<Redemption>, String> { all(|c| format!("{DATA}/v2/activity?user={user}&type=REDEEM&limit=500{}", cursor(c)), read_redemptions, timeout, max_pages).await }
 
 /// `GET /balance-allowance` for the collateral of a Deposit Wallet (signature type 3), as the SDK asks it.
 pub fn balance_request(host: &str, s: &Signer, c: &Creds, ts_s: u64) -> Result<Vec<u8>, OrderError> {

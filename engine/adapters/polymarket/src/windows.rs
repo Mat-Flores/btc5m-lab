@@ -8,7 +8,6 @@ use std::time::Duration;
 
 const GAMMA: &str = "https://gamma-api.polymarket.com";
 const CLOB: &str = "https://clob.polymarket.com";
-const TIMEOUT: Duration = Duration::from_secs(5);
 
 fn s<'a>(v: &'a Value, k: &str) -> Result<&'a str, String> { v[k].as_str().ok_or_else(|| format!("missing {k}")) }
 fn list(v: &Value, k: &str) -> Result<Vec<String>, String> { serde_json::from_str(s(v, k)?).map_err(|e| format!("{k}: {e}")) }
@@ -59,12 +58,12 @@ fn ok_body(r: Result<(u16, String), String>) -> Result<String, String> {
 }
 
 /// Reads one window. Ok(None): gamma does not list it yet.
-pub async fn fetch(m: &MarketSpec, start: u64) -> Result<Option<Window>, String> {
-    let body = ok_body(crate::http_get(&format!("{GAMMA}/events?slug={}", m.slug(start)), TIMEOUT).await).map_err(|e| format!("gamma: {e}"))?;
+pub async fn fetch(m: &MarketSpec, start: u64, timeout: Duration) -> Result<Option<Window>, String> {
+    let body = ok_body(crate::http_get(&format!("{GAMMA}/events?slug={}", m.slug(start)), timeout).await).map_err(|e| format!("gamma: {e}"))?;
     let events: Value = serde_json::from_str(&body).map_err(|e| format!("gamma json: {e}"))?;
     let Some(ev) = events.as_array().and_then(|a| a.first()) else { return Ok(None) };
     let cid = s(&ev["markets"][0], "conditionId")?.to_string();
-    let clob = ok_body(crate::http_get(&format!("{CLOB}/clob-markets/{cid}"), TIMEOUT).await).ok().and_then(|b| serde_json::from_str::<Value>(&b).ok());
+    let clob = ok_body(crate::http_get(&format!("{CLOB}/clob-markets/{cid}"), timeout).await).ok().and_then(|b| serde_json::from_str::<Value>(&b).ok());
     parse(m, start, ev, clob.as_ref()).map(Some)
 }
 

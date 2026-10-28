@@ -90,8 +90,10 @@ pub struct Paper {
     book_ms: HashMap<String, u64>,
     pending: Vec<Pending>,
     last_value: HashMap<String, Micro>,
-    /// Last valuation written per token: at most one a second goes to the ledger (measured: 73 451 in 8 min otherwise).
+    /// Last valuation written per token: at most one per `valuation_every_ms` goes to the ledger (measured: 73 451 in
+    /// 8 min otherwise).
     written_ms: HashMap<String, u64>,
+    valuation_every_ms: u64,
     decisions: u64,
     matched: u64,
     missed: u64,
@@ -104,14 +106,14 @@ pub struct Paper {
 
 impl Paper {
     /// The paper mode and the strategy the engine is to run. `oracle`: the configured Chainlink source.
-    pub fn open(cfg: PaperCfg, clock: Arc<Clock>, oracle: String) -> (Paper, Box<dyn Strategy>) {
+    pub fn open(cfg: PaperCfg, clock: Arc<Clock>, oracle: String, sync: SyncPolicy, valuation_every_ms: u64) -> (Paper, Box<dyn Strategy>) {
         let (ledger, rep) = Ledger::open(&cfg.ledger).expect("paper ledger");
         // restart: the paper account is what its ledger says
         let mut acct = Account::default();
         for e in read_all::<Value>(&cfg.ledger).expect("paper ledger read") {
             if let Ok(f) = serde_json::from_value::<account::Fact>(e.fact) { acct.apply(e.seq, &f); }
         }
-        let (facts, _durable, writer) = spawn_writer::<Line>(ledger, SyncPolicy::default());
+        let (facts, _durable, writer) = spawn_writer::<Line>(ledger, sync);
         let signer = Signer::from_bytes(&[0x11; 32], "0x7a57144fafde87f5ce4a880d570bae58eebc83f2").unwrap();
         let (cap_tx, cap_rx) = std::sync::mpsc::channel::<Cap>();
         let path = cfg.capture.clone();
@@ -125,7 +127,7 @@ impl Paper {
         let mut p = Paper {
             strat: strat.clone(), source, one_way_ms: cfg.one_way_ms, taker_delay_ms: cfg.taker_delay_ms, signer, salt: 0, clock,
             facts, writer: Some(writer), next_seq: rep.entries, cap: Some(cap_tx), capture: Some(capture), acct, markets: HashMap::new(), book_ms: HashMap::new(), pending: vec![],
-            last_value: HashMap::new(), written_ms: HashMap::new(), decisions: 0, matched: 0, missed: 0, sign_us: Hist::default(), delay_ms: Hist::default(),
+            last_value: HashMap::new(), written_ms: HashMap::new(), valuation_every_ms, decisions: 0, matched: 0, missed: 0, sign_us: Hist::default(), delay_ms: Hist::default(),
             strat_us: Hist::default(), strat_pnl: 0.0, strat_closes: 0,
         };
         let id = format!("{}_phase9", chrono_id(p.clock.now().wall_ns));
@@ -252,7 +254,7 @@ impl Paper {
             let Some(p) = self.acct.open.get(&token) else { continue };
             let Some(v) = value(p, books.and_then(|b| b.get(&token)), age) else { continue };
             if self.last_value.insert(token.clone(), v.value) == Some(v.value) { continue; }
-            if self.written_ms.get(&token).is_some_and(|w| now_ms < w + 1000) { continue; }
+            if self.written_ms.get(&token).is_some_and(|w| now_ms < w + self.valuation_every_ms) { continue; }
             self.written_ms.insert(token, now_ms);
             self.fact(Line::Paper(Fact::Valuation { valuation: v }));
         }

@@ -262,7 +262,7 @@ mod tests {
     fn quotes_both_sides_and_takes_its_fills() {
         let m = MarketSpec { venue: "polymarket".into(), asset: "btc".into(), horizon_s: 300 };
         let s = crate::registry::strategy("maker", serde_json::json!({ "sources": { "price": "okx", "oracle": "chainlink", "book": "polymarket" }, "liqCap": false }), &m).unwrap();
-        let mut e = Engine::new(vec![("okx".into(), false), ("chainlink".into(), false), ("polymarket".into(), true)], vec![s]).unwrap();
+        let mut e = Engine::new(vec![("okx".into(), false), ("chainlink".into(), false), ("polymarket".into(), true)], vec![s], 200_000_000, 3600).unwrap();
         e.used[2] = true;
         let w = Window { start: S, end: S + 300, slug: format!("btc-updown-5m-{S}"), market: "m".into(), tokens: ["up".into(), "down".into()], tick: 10_000, min_size: 5_000_000,
             fee: FeeSchedule { rate: 70_000, exponent: 1, rebate_rate: 200_000 }, taker_delay: true, twap_s: Some(60), price_to_beat: None, winner: None };

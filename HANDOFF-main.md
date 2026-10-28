@@ -11,7 +11,7 @@
 
 ## engine/ validé (2026-10-28)
 - 131 tests OK (24 suites), parité replay identique sur les 3 sessions. `config.example.json` exhaustif vis-à-vis de `Config` (test `config_example_is_valid_complete_and_default`).
-- Écart E2 en attente de décision utilisateur : constantes encore dans le code (`main.rs` : SLOW_MS, RECYCLE_COOLDOWN_NS, RESYNC_RETRY_NS, AFTER_END_S, EWMA, SWITCH_MS, tick 50 ms, timeouts HTTP 5 s ; d'autres dans core/adapters).
+- E2 fait (2026-10-28) : constantes de réglage engine dans `runtime` (config.example.json), défauts = valeurs d'avant, parité identique. Restent en dur, À DÉCIDER par l'utilisateur : constantes de stratégie (`strategies/maker.rs:59` KEEP_NS, `strategy/src/maker.rs` END/T_END/K_TAPE, `strategy/src/model.rs` WINDOW/FLOOR/PRIOR, `registry.rs` HORIZON_S, capital0, claim). Clés `runtime.*` à documenter dans `engine/README.md`.
 - À écrire dans le README engine : `config.example.json` copié tel quel arme le wallet (`live` rempli). `deny_unknown_fields` rend la config plus stricte.
 - Le `.jsonl.gz` source de la session `2026-10-16T01-17-20_dublin` est tronqué (sans effet sur la parité). `replay.sh` depuis Git Bash : préfixer `MSYS_NO_PATHCONV=1`.
 
@@ -42,4 +42,4 @@
 - Oracle maker (≈22 min, dans `btc5m-lag-sim`, lecture seule) : `node --max-old-space-size=8192 engine/maker-bt/validate.mjs --delay 0 --sim exact` → 59695 ordres, ratio 1.044, exacts 0.841, PnL 16581 $ / 17331 $.
 
 ## Prochaine action
-Obtenir la décision de l'utilisateur sur les constantes engine (E2), puis étape « Resserrer le test source-tracing ».
+Faire l'étape « Resserrer le test source-tracing » (exiger binance-spot, binance-perp, coinbase dans `example_config_is_valid_and_complete`).

@@ -27,7 +27,7 @@ use engine_core::supervisor::Health;
 use engine_core::value::{value, StopLoss, Trigger, Valuation};
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -52,7 +52,109 @@ struct Config { #[serde(default = "btc_5m")] market: MarketSpec, ledger: String,
     /// Paper mode (phase 9): the reference strategy on the live feeds, nothing sent (`paper.rs`).
     #[serde(default)] paper: Option<paper::PaperCfg>,
     /// Live mode (phase 10): the paper strategy's decisions sent for real (`live.rs`); needs `paper` and `account`.
-    #[serde(default)] live: Option<live::LiveCfg> }
+    #[serde(default)] live: Option<live::LiveCfg>,
+    #[serde(default)] runtime: Runtime }
+
+/// Operating settings of the shell, the feeds, the venue reads and the sender; each default is the value the engine
+/// ran with before it was a setting (the reason of each is at its use).
+#[derive(Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+struct Runtime {
+    /// Period of the hot thread's timer (books gone quiet, connection choice, strategies' tick).
+    tick_ms: u64,
+    /// A connection whose data arrives this late is replaced (new path) rather than drained: measured, a slow path
+    /// built up 27 s of backlog, and draining it delayed the other connections.
+    slow_ms: f64,
+    /// Another connection of the source younger than this counts as fresh (a late connection alone is a slow path).
+    fresh_ms: f64,
+    /// Least time between two replacements of one connection.
+    recycle_cooldown_ms: u64,
+    /// A requested snapshot that has not come is asked for again after this long.
+    resync_retry_ms: u64,
+    /// A book change left unconfirmed this long is checked.
+    book_quiet_ms: u64,
+    /// A finished window's books are dropped this long after its end.
+    after_end_s: u64,
+    /// Smoothing of each connection's age, and the advantage needed to switch to another connection.
+    age_ewma: f64,
+    switch_ms: f64,
+    /// Order bench: one order every this long.
+    bench_every_ms: u64,
+    /// Windows read ahead: gamma lists them an hour early, and a 7 min gamma outage (2026-10-21) cost a window with 1.
+    windows_ahead: u64,
+    /// Window metadata kept this long after the latest window's start (late orders, results).
+    windows_kept_s: u64,
+    /// Period of the cold thread's loop.
+    cold_loop_ms: u64,
+    /// Official results: gamma publishes them some time after the end; asked every `results_every_s` from
+    /// `results_after_end_s` after the end, given up `results_give_up_s` after the window's start.
+    results_every_s: u64,
+    results_after_end_s: u64,
+    results_give_up_s: u64,
+    /// Timeout of the cold reads (gamma, data-api, CLOB balance and open orders) and of the API credentials' derivation.
+    http_timeout_ms: u64,
+    /// Pages read at most from a paginated account read (a cursor that never ends would loop).
+    max_pages: usize,
+    /// The ledgers' fsync: after this many facts or this long, whichever comes first.
+    ledger_sync_max_pending: u64,
+    ledger_sync_max_delay_ms: u64,
+    /// Paper mode: a position's valuation is written at most this often.
+    paper_valuation_every_ms: u64,
+    /// Live sender: time for an order's answer (measured: 0.87 to 3.5 s after the write on real orders, 2026-10-21/22),
+    /// then how long a late answer is still awaited.
+    order_answer_ms: u64,
+    order_grace_ms: u64,
+    /// Keep-alive read of the sender's connection: period and timeout.
+    warm_every_s: u64,
+    warm_timeout_ms: u64,
+    /// An order left unknown is queried every `order_query_every_ms`, `order_query_tries` times (a minute).
+    order_query_every_ms: u64,
+    order_query_tries: u32,
+    order_query_timeout_ms: u64,
+    /// Wait after a 425/429 answer that names none (Retry-After).
+    back_off_s: u64,
+    /// Trades of the user channel kept while their order's answer has not come.
+    early_trades_max: usize,
+    feed: feed::Timing,
+    /// Per adapter kind: the silence after which a connection is invalid, and the heartbeat period (null: the source
+    /// has none). A kind left out keeps its adapter's values.
+    #[serde(deserialize_with = "adapter_timings")]
+    adapters: BTreeMap<String, AdapterTiming>,
+}
+#[derive(Deserialize, Serialize, Clone, Copy)]
+#[serde(deny_unknown_fields)]
+struct AdapterTiming { silence_ms: u64, heartbeat_ms: Option<u64> }
+
+/// The adapters' own values, for every kind the engine may run ("polymarket-user": the live mode's trade channel).
+fn adapter_defaults() -> BTreeMap<String, AdapterTiming> {
+    let user = adapter_polymarket::user::User { creds: Creds { key: String::new(), secret: String::new(), passphrase: String::new() } };
+    let of = |a: &dyn feed::Adapter| AdapterTiming { silence_ms: a.caps().silence.as_millis() as u64, heartbeat_ms: a.heartbeat().map(|h| h.0.as_millis() as u64) };
+    engine_app::registry::FEED_KINDS.iter().map(|k| (k.to_string(), of(engine_app::registry::feed_adapter(k).unwrap().0.as_ref())))
+        .chain([("polymarket-user".to_string(), of(&user))]).collect()
+}
+fn adapter_timings<'de, D: serde::Deserializer<'de>>(d: D) -> Result<BTreeMap<String, AdapterTiming>, D::Error> {
+    let mut all = adapter_defaults();
+    for (k, v) in BTreeMap::<String, AdapterTiming>::deserialize(d)? {
+        let Some(x) = all.get_mut(&k) else { return Err(serde::de::Error::custom(format!("unknown adapter {k}"))) };
+        if v.heartbeat_ms.is_some() != x.heartbeat_ms.is_some() { return Err(serde::de::Error::custom(format!("{k}: heartbeat_ms must be {}", if x.heartbeat_ms.is_some() { "a number" } else { "null" }))); }
+        *x = v;
+    }
+    Ok(all)
+}
+impl Default for Runtime {
+    fn default() -> Self {
+        Runtime { tick_ms: 50, slow_ms: 1_000.0, fresh_ms: 250.0, recycle_cooldown_ms: 10_000, resync_retry_ms: 5_000, book_quiet_ms: 200, after_end_s: 15,
+            age_ewma: 0.02, switch_ms: 5.0, bench_every_ms: 100, windows_ahead: 3, windows_kept_s: 3600, cold_loop_ms: 1_000, results_every_s: 15,
+            results_after_end_s: 30, results_give_up_s: 3600, http_timeout_ms: 5_000, max_pages: 20, ledger_sync_max_pending: 64, ledger_sync_max_delay_ms: 50,
+            paper_valuation_every_ms: 1_000, order_answer_ms: 5_000, order_grace_ms: 10_000, warm_every_s: 20, warm_timeout_ms: 2_000,
+            order_query_every_ms: 2_000, order_query_tries: 30, order_query_timeout_ms: 2_000, back_off_s: 1, early_trades_max: 1_000,
+            feed: feed::Timing::default(), adapters: adapter_defaults() }
+    }
+}
+impl Runtime {
+    fn ms(&self, ms: u64) -> Duration { Duration::from_millis(ms) }
+    fn sync(&self) -> SyncPolicy { SyncPolicy { max_pending: self.ledger_sync_max_pending, max_delay: self.ms(self.ledger_sync_max_delay_ms) } }
+}
 
 /// What the cold thread read about the account. `None`: not read.
 struct Reads { holdings: Option<Vec<Holding>>, redemptions: Option<Vec<Redemption>>, balance: Option<Micro>, open_orders: Option<BTreeSet<String>> }
@@ -70,18 +172,6 @@ impl Rec {
     /// Writes an accounting fact only if it changes the account (a read repeated every few seconds is not a fact).
     fn keep(&self, a: &mut Account, f: account::Fact) -> bool { a.apply(self.next.get(), &f) && { self.send(Line::Account(f)); true } }
 }
-
-/// A connection whose data arrives this late is replaced (new path) rather than drained: measured, a slow path built
-/// up 27 s of backlog, and draining it delayed the other connections.
-const SLOW_MS: f64 = 1_000.0;
-const RECYCLE_COOLDOWN_NS: u64 = 10_000_000_000;
-/// A requested snapshot that has not come is asked for again after this long.
-const RESYNC_RETRY_NS: u64 = 5_000_000_000;
-/// A finished window's books are dropped this long after its end.
-const AFTER_END_S: u64 = 15;
-/// Smoothing of each connection's age, and the advantage needed to switch to another connection.
-const EWMA: f64 = 0.02;
-const SWITCH_MS: f64 = 5.0;
 
 #[derive(Serialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -157,18 +247,17 @@ impl Conn {
 
 /// Order path bench (phase 6): from the decision instant to the last byte of a signed order written, under the
 /// real feed load. Throwaway key and credentials; the sink is a local socket that discards: nothing reaches a venue.
-struct Bench { signer: Signer, creds: Creds, sink: engine_core::http::Conn, next_ns: u64, salt: u64, last_token: String, total_us: Hist, sign_us: Hist, first_us: Vec<f64>, value_us: Hist }
-const BENCH_EVERY_NS: u64 = 100_000_000;
+struct Bench { signer: Signer, creds: Creds, sink: engine_core::http::Conn, next_ns: u64, salt: u64, last_token: String, total_us: Hist, sign_us: Hist, first_us: Vec<f64>, value_us: Hist, every_ns: u64 }
 
 impl Bench {
-    async fn new() -> Bench {
+    async fn new(every_ns: u64) -> Bench {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = l.local_addr().unwrap().port();
         std::thread::spawn(move || { use std::io::Read; let (mut s, _) = l.accept().unwrap(); let mut b = [0u8; 65536]; while s.read(&mut b).map(|k| k > 0).unwrap_or(false) {} });
         let sink = engine_core::http::Conn::new(engine_core::http::dial("127.0.0.1", port, false).await.unwrap());
         let signer = Signer::from_bytes(&[0x11; 32], "0x7a57144fafde87f5ce4a880d570bae58eebc83f2").unwrap();
         let creds = Creds { key: "00000000-0000-4000-8000-000000000000".into(), secret: "c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0MDA=".into(), passphrase: "bench".into() };
-        Bench { signer, creds, sink, next_ns: 0, salt: 1, last_token: String::new(), total_us: Hist::default(), sign_us: Hist::default(), first_us: vec![], value_us: Hist::default() }
+        Bench { signer, creds, sink, next_ns: 0, salt: 1, last_token: String::new(), total_us: Hist::default(), sign_us: Hist::default(), first_us: vec![], value_us: Hist::default(), every_ns }
     }
 
     /// One order on `token` at a mid-grid price: amounts, signature, body, headers, write.
@@ -185,7 +274,7 @@ impl Bench {
         self.total_us.push(us);
         self.sign_us.push((t1.mono_ns - t0.mono_ns) as f64 / 1000.0);
         if token != self.last_token { self.first_us.push(us); self.last_token = token.into(); }
-        self.next_ns = t0.mono_ns + BENCH_EVERY_NS;
+        self.next_ns = t0.mono_ns + self.every_ns;
     }
 }
 
@@ -225,7 +314,8 @@ fn main() {
     for e in read_all::<serde_json::Value>(&cfg.ledger).expect("ledger read") {
         if let Ok(f) = serde_json::from_value::<account::Fact>(e.fact) { book_keeping.apply(e.seq, &f); }
     }
-    let (facts, _durable, writer) = spawn_writer::<Line>(ledger, SyncPolicy::default());
+    let tune = std::mem::take(&mut cfg.runtime);
+    let (facts, _durable, writer) = spawn_writer::<Line>(ledger, tune.sync());
     let recorder = Rec { tx: facts.clone(), clock: clock.clone(), next: Cell::new(rep.entries) };
     let rec = &recorder;
     let fact = move |f: Fact| { rec.send(Line::Engine(f)); };
@@ -234,7 +324,7 @@ fn main() {
     let armed = cfg.live.as_ref().map(|l| {
         let acc = cfg.account.as_ref().expect("live: needs \"account\" (reconciliation)");
         assert!(cfg.paper.is_some(), "live: needs \"paper\" (its strategy decides)");
-        let a = live::arm(l);
+        let a = live::arm(l, tune.ms(tune.http_timeout_ms));
         assert!(acc.address.is_empty() || a.signer.wallet.eq_ignore_ascii_case(&acc.address), "live: account.address is not the wallet of the key");
         fact(Fact::Armed { eoa: a.signer.address.clone(), wallet: a.signer.wallet.clone(), clock_synced: a.clock_synced });
         a
@@ -250,6 +340,8 @@ fn main() {
     // windows of positions held at startup still need their result
     let mut unresolved: Vec<u64> = book_keeping.open.values().filter(|p| p.won.is_none()).map(|p| (p.end_ms / 1000).saturating_sub(cfg.market.horizon_s)).collect();
     let market = cfg.market.clone();
+    let (http_timeout, max_pages, ahead, kept_s, loop_ms) = (tune.ms(tune.http_timeout_ms), tune.max_pages, tune.windows_ahead, tune.windows_kept_s, tune.cold_loop_ms);
+    let (results_every_s, results_after_end_s, results_give_up_s) = (tune.results_every_s, tune.results_after_end_s, tune.results_give_up_s);
     std::thread::Builder::new().name("cold".into()).spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         rt.block_on(async move {
@@ -259,17 +351,15 @@ fn main() {
             loop {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
                 let s = market.window_start(now);
-                // 3 windows ahead: gamma lists them an hour early, and a 7 min gamma outage (2026-10-21) cost a window with 1
-                for start in (0..=3).map(|k| s + k * market.horizon_s) {
+                for start in (0..=ahead).map(|k| s + k * market.horizon_s) {
                     if known.contains(&start) { continue; }
-                    if let Ok(Some(w)) = windows::fetch(&market, start).await { known.push(start); unresolved.push(start); if win_tx.send(w).is_err() { return; } }
+                    if let Ok(Some(w)) = windows::fetch(&market, start, http_timeout).await { known.push(start); unresolved.push(start); if win_tx.send(w).is_err() { return; } }
                 }
-                known.retain(|x| *x + 3600 > s);
-                // results: gamma publishes them some time after the end; asked every 15 s, given up after an hour
+                known.retain(|x| *x + kept_s > s);
                 if now >= next_result {
-                    next_result = now + 15;
-                    for start in unresolved.clone().into_iter().filter(|x| x + market.horizon_s + 30 < now) {
-                        if let Ok(Some(w)) = windows::fetch(&market, start).await {
+                    next_result = now + results_every_s;
+                    for start in unresolved.clone().into_iter().filter(|x| x + market.horizon_s + results_after_end_s < now) {
+                        if let Ok(Some(w)) = windows::fetch(&market, start, http_timeout).await {
                             if let Some(o) = w.winner {
                                 unresolved.retain(|x| *x != start);
                                 let up_won = o == 0;
@@ -278,7 +368,7 @@ fn main() {
                             }
                         }
                     }
-                    unresolved.retain(|x| x + 3600 > now);
+                    unresolved.retain(|x| x + results_give_up_s > now);
                 }
                 if let Some((addr, every)) = address.as_ref().filter(|_| now >= next_account) {
                     next_account = now + every;
@@ -286,19 +376,19 @@ fn main() {
                     let (mut balance, mut open_orders) = (None, None);
                     if let Some((s, c)) = auth.as_ref() {
                         let reads = clob_reads.get_or_insert_with(|| Clob::new(HOST, 443, true, NetGuard::new(&ALLOWED, Arc::new(std::sync::atomic::AtomicBool::new(false)))));
-                        if let Ok(q) = venue::balance_request(HOST, s, c, now) { balance = reads.get(&q, Duration::from_secs(5)).await.ok().and_then(|r| venue::read_balance(&r)); }
+                        if let Ok(q) = venue::balance_request(HOST, s, c, now) { balance = reads.get(&q, http_timeout).await.ok().and_then(|r| venue::read_balance(&r)); }
                         let (mut ids, mut cursor) = (BTreeSet::new(), None::<String>);
-                        for _ in 0..20 {
+                        for _ in 0..max_pages {
                             let Ok(q) = venue::open_orders_request(HOST, s, c, cursor.as_deref(), now) else { break };
-                            let Some((page, next)) = reads.get(&q, Duration::from_secs(5)).await.ok().and_then(|r| venue::read_open_orders(&r)) else { break };
+                            let Some((page, next)) = reads.get(&q, http_timeout).await.ok().and_then(|r| venue::read_open_orders(&r)) else { break };
                             ids.extend(page);
                             match next { Some(n) => cursor = Some(n), None => { open_orders = Some(ids); break; } }
                         }
                     }
-                    let r = Reads { holdings: venue::holdings(addr).await.ok(), redemptions: venue::redemptions(addr).await.ok(), balance, open_orders };
+                    let r = Reads { holdings: venue::holdings(addr, http_timeout, max_pages).await.ok(), redemptions: venue::redemptions(addr, http_timeout, max_pages).await.ok(), balance, open_orders };
                     if cold_tx.send(Cold::Account(r)).is_err() { return; }
                 }
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(Duration::from_millis(loop_ms)).await;
             }
         });
     }).unwrap();
@@ -309,7 +399,7 @@ fn main() {
         assert!(cfg.sources.iter().any(|s| s.name == p.strategy.source), "paper: strategy source {} not configured", p.strategy.source);
         assert_eq!(cfg.market.horizon_s, 300, "paper: the reference strategy is built for 5-minute windows");
         let oracle = cfg.sources.iter().find(|s| s.adapter == "chainlink-rtds").map_or_else(|| "chainlink".to_string(), |s| s.name.clone());
-        let (p, s) = paper::Paper::open(p, clock.clone(), oracle);
+        let (p, s) = paper::Paper::open(p, clock.clone(), oracle, tune.sync(), tune.paper_valuation_every_ms);
         strategies.push(s);
         p
     });
@@ -327,7 +417,8 @@ fn main() {
                 let (a, has_books) = engine_app::registry::feed_adapter(&s.adapter).unwrap_or_else(|| panic!("unknown adapter {}", s.adapter));
                 let (cmd, cmd_rx) = mpsc::unbounded_channel();
                 let label = if s.connections > 1 { format!("{}#{}", s.name, k + 1) } else { s.name.clone() };
-                tokio::spawn(feed::run(a, conns.len() as SourceId, s.topics.clone(), clock.clone(), cmd_rx, out_tx.clone()));
+                let t = tune.adapters[&s.adapter];
+                tokio::spawn(feed::run_tuned(a, conns.len() as SourceId, 0, s.topics.clone(), clock.clone(), cmd_rx, out_tx.clone(), false, tune.feed.clone(), tune.ms(t.silence_ms), t.heartbeat_ms.map(|h| tune.ms(h))));
                 engine_sources.push((s.name.clone(), has_books));
                 conns.push(Conn { label, source: si, cmd, broken: HashMap::new(),
                     valid: false, invalid_since: None, age_ewma: None, recycled_at: None, recycles: 0, msgs: 0, last_recv: None, gaps_ms: Hist::default(), invalid: 0, invalid_ms: vec![], ages_ms: HashMap::new(), failures: HashMap::new() });
@@ -337,18 +428,19 @@ fn main() {
         let user_conn = armed.as_ref().map(|a| {
             let (cmd, cmd_rx) = mpsc::unbounded_channel();
             let creds = Creds { key: a.creds.key.clone(), secret: a.creds.secret.clone(), passphrase: a.creds.passphrase.clone() };
-            tokio::spawn(feed::run(Box::new(adapter_polymarket::user::User { creds }), conns.len() as SourceId, vec![], clock.clone(), cmd_rx, out_tx.clone()));
+            let t = tune.adapters["polymarket-user"];
+            tokio::spawn(feed::run_tuned(Box::new(adapter_polymarket::user::User { creds }), conns.len() as SourceId, 0, vec![], clock.clone(), cmd_rx, out_tx.clone(), false, tune.feed.clone(), tune.ms(t.silence_ms), t.heartbeat_ms.map(|h| tune.ms(h))));
             engine_sources.push(("user".into(), false));
             conns.push(Conn { label: "user".into(), source: cfg.sources.len(), cmd, broken: HashMap::new(),
                 valid: false, invalid_since: None, age_ewma: None, recycled_at: None, recycles: 0, msgs: 0, last_recv: None, gaps_ms: Hist::default(), invalid: 0, invalid_ms: vec![], ages_ms: HashMap::new(), failures: HashMap::new() });
             conns.len() - 1
         });
-        let mut eng = Engine::new(engine_sources, std::mem::take(&mut strategies)).unwrap_or_else(|e| panic!("engine: {e}"));
+        let mut eng = Engine::new(engine_sources, std::mem::take(&mut strategies), tune.book_quiet_ms * 1_000_000, tune.windows_kept_s).unwrap_or_else(|e| panic!("engine: {e}"));
         let mut cmds: Vec<Command> = vec![];
         let armed_flag = Arc::new(std::sync::atomic::AtomicBool::new(armed.is_some()));
         let mut seen_tokens: HashSet<String> = HashSet::new();
         let (mut real, mut done_rx) = match (armed, cfg.live.as_ref()) {
-            (Some(a), Some(l)) => { let (v, rx) = live::LiveVenue::new(a, l, armed_flag.clone(), clock.clone()); (Some(v), Some(rx)) }
+            (Some(a), Some(l)) => { let (v, rx) = live::LiveVenue::new(a, l, armed_flag.clone(), clock.clone(), &tune); (Some(v), Some(rx)) }
             _ => (None, None),
         };
         fact(Fact::Boot { connections: conns.iter().map(|c| c.label.clone()).collect() });
@@ -358,7 +450,7 @@ fn main() {
         let mut used_ms_without_ready: f64 = 0.0;
         let mut switches = 0u64;
         let mut engine_us = Hist::default();
-        let mut bench = if cfg.bench_orders { Some(Bench::new().await) } else { None };
+        let mut bench = if cfg.bench_orders { Some(Bench::new(tune.bench_every_ms * 1_000_000).await) } else { None };
         let mut live: Vec<Window> = vec![];
         let mut opens_while_running: HashMap<String, u64> = HashMap::new();
         let mut recovered: Vec<f64> = vec![];
@@ -373,7 +465,7 @@ fn main() {
         // SIGTERM ends the run like its deadline (report, ledgers and capture flushed); SIGUSR1 is the emergency stop
         use tokio::signal::unix::{signal, SignalKind};
         let (mut term, mut usr1) = (signal(SignalKind::terminate()).expect("SIGTERM"), signal(SignalKind::user_defined1()).expect("SIGUSR1"));
-        let mut tick = tokio::time::interval(Duration::from_millis(50));
+        let mut tick = tokio::time::interval(tune.ms(tune.tick_ms));
         loop {
             tokio::select! {
                 _ = tokio::time::sleep_until(deadline) => break,
@@ -390,16 +482,16 @@ fn main() {
                         let quiet = eng.books[i].as_mut().unwrap().quiet(now.mono_ns);
                         for (asset, why) in quiet { c.broke(asset, why, now.mono_ns, &fact); }
                         // a requested snapshot that did not come is asked for again
-                        let due: Vec<String> = c.broken.iter().filter(|(_, b)| now.mono_ns - b.last_resync >= RESYNC_RETRY_NS).map(|(a, _)| a.clone()).collect();
+                        let due: Vec<String> = c.broken.iter().filter(|(_, b)| now.mono_ns - b.last_resync >= tune.resync_retry_ms * 1_000_000).map(|(a, _)| a.clone()).collect();
                         for a in due { c.broken.get_mut(&a).unwrap().last_resync = now.mono_ns; c.resync(&a); }
                         // finished windows: unsubscribe and forget their books
-                        for w in live.iter().filter(|w| w.end + AFTER_END_S < now_s) {
+                        for w in live.iter().filter(|w| w.end + tune.after_end_s < now_s) {
                             let _ = c.cmd.send(Cmd::Unsubscribe(vec![w.up().clone(), w.down().clone()]));
                             for a in [w.up(), w.down()] { eng.books[i].as_mut().unwrap().remove(a); c.broken.remove(a); }
                         }
                     }
-                    for w in live.iter().filter(|w| w.end + AFTER_END_S < now_s) { fact(Fact::WindowDropped { slug: w.slug.clone() }); }
-                    live.retain(|w| w.end + AFTER_END_S >= now_s);
+                    for w in live.iter().filter(|w| w.end + tune.after_end_s < now_s) { fact(Fact::WindowDropped { slug: w.slug.clone() }); }
+                    live.retain(|w| w.end + tune.after_end_s >= now_s);
                     // the freshest ready connection is used; switching needs a clear advantage
                     let assets: Vec<&String> = live.iter().filter(|w| w.end > now_s).flat_map(|w| [w.up(), w.down()]).collect();
                     let best = book_conns.iter().copied().filter(|&i| conns[i].ready(eng.books[i].as_ref(), &assets)).min_by(|&a, &b| conns[a].age_ewma.unwrap_or(f64::MAX).total_cmp(&conns[b].age_ewma.unwrap_or(f64::MAX)));
@@ -408,7 +500,7 @@ fn main() {
                         (_, None) => None,
                         (None, Some(b)) => Some(b),
                         (Some(s), Some(b)) if !keep => Some(b).filter(|&b| b != s),
-                        (Some(s), Some(b)) => Some(b).filter(|&b| b != s && conns[b].age_ewma.unwrap_or(f64::MAX) + SWITCH_MS < conns[s].age_ewma.unwrap_or(f64::MAX)),
+                        (Some(s), Some(b)) => Some(b).filter(|&b| b != s && conns[b].age_ewma.unwrap_or(f64::MAX) + tune.switch_ms < conns[s].age_ewma.unwrap_or(f64::MAX)),
                     };
                     if let Some(b) = switch {
                         if selected.is_some() { switches += 1; }
@@ -425,7 +517,7 @@ fn main() {
                     let t0 = clock.now().mono_ns;
                     eng.on(EngineInput::Tick, now, &mut cmds);
                     if let Some(p) = paper.as_mut() { p.after(&cmds, now.mono_ns, (clock.now().mono_ns - t0) as f64 / 1000.0); }
-                    if !book_conns.is_empty() && !assets.is_empty() && best.is_none() { used_ms_without_ready += 50.0; }
+                    if !book_conns.is_empty() && !assets.is_empty() && best.is_none() { used_ms_without_ready += tune.tick_ms as f64; }
                 }
                 Some(w) = win_rx.recv() => {
                     fact(Fact::Window { slug: w.slug.clone(), start: w.start, up: w.up().clone(), down: w.down().clone(), tick: w.tick, min_size: w.min_size, fee_rate: w.fee.rate, fee_exponent: w.fee.exponent, taker_delay: w.taker_delay });
@@ -506,7 +598,7 @@ fn main() {
                                 // changes may have been lost while the connection was down: books restart empty and
                                 // become usable again only with their new snapshot
                                 if eng.books[source as usize].is_some() {
-                                    let mut fresh = engine_app::engine::new_books();
+                                    let mut fresh = engine_app::engine::new_books(eng.book_quiet_ns);
                                     for w in &live { for a in [w.up(), w.down()] { fresh.entry(a).tick = w.tick; } }
                                     eng.books[source as usize] = Some(fresh); c.broken.clear();
                                 }
@@ -536,7 +628,7 @@ fn main() {
                         touched.dedup();
                         // late alone means a slow path; late together means the source itself (measured: all three
                         // connections 1.86 s late at once): only the first is worth a new connection
-                        let other_fresh = conns.iter().enumerate().any(|(j, o)| j != ci && o.source == conns[ci].source && o.valid && o.age_ewma.is_some_and(|x| x < SLOW_MS / 4.0));
+                        let other_fresh = conns.iter().enumerate().any(|(j, o)| j != ci && o.source == conns[ci].source && o.valid && o.age_ewma.is_some_and(|x| x < tune.fresh_ms));
                         let c = &mut conns[ci];
                         c.msgs += 1;
                         // interval between frames (events of one frame share its stamp), to calibrate silence thresholds
@@ -544,9 +636,9 @@ fn main() {
                         // a snapshot's timestamp is its last change, not its sending time: it is not an age
                         if let Some(a) = age {
                             c.ages_ms.entry(k).or_default().push(a);
-                            if k == "delta" { c.age_ewma = Some(c.age_ewma.map_or(a, |x| x + EWMA * (a - x))); }
+                            if k == "delta" { c.age_ewma = Some(c.age_ewma.map_or(a, |x| x + tune.age_ewma * (a - x))); }
                             // far behind: replace the connection instead of draining its backlog
-                            if a > SLOW_MS && other_fresh && has_books && c.recycled_at.is_none_or(|t| e.recv.mono_ns - t >= RECYCLE_COOLDOWN_NS) {
+                            if a > tune.slow_ms && other_fresh && has_books && c.recycled_at.is_none_or(|t| e.recv.mono_ns - t >= tune.recycle_cooldown_ms * 1_000_000) {
                                 c.recycled_at = Some(e.recv.mono_ns); c.recycles += 1; c.valid = false; c.age_ewma = None;
                                 let _ = c.cmd.send(Cmd::Resync);
                                 fact(Fact::ConnectionRecycled { connection: c.label.clone(), age_ms: a });
@@ -690,5 +782,15 @@ mod tests {
         let mut typo = file.clone();
         typo["account"]["stop_loss"]["los"] = 1.into();
         assert!(serde_json::from_value::<Config>(typo).is_err());
+        // runtime.adapters: a kind given alone keeps the others' values; an unknown kind, or a heartbeat on a source without one, is refused
+        let mut one = file.clone();
+        one["runtime"]["adapters"] = serde_json::json!({ "okx-bbo-tbt": { "silence_ms": 4000, "heartbeat_ms": 20000 } });
+        let c: Config = serde_json::from_value(one).unwrap();
+        assert_eq!((c.runtime.adapters["okx-bbo-tbt"].silence_ms, c.runtime.adapters["coinbase"].silence_ms, c.runtime.adapters.len()), (4000, 5000, 7));
+        for bad in [serde_json::json!({ "okx": { "silence_ms": 1, "heartbeat_ms": 1 } }), serde_json::json!({ "coinbase": { "silence_ms": 1, "heartbeat_ms": 1 } })] {
+            let mut b = file.clone();
+            b["runtime"]["adapters"] = bad;
+            assert!(serde_json::from_value::<Config>(b).is_err());
+        }
     }
 }

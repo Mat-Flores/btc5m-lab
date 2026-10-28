@@ -6,6 +6,9 @@ use engine_core::feed::Adapter;
 use engine_core::market::MarketSpec;
 use serde_json::Value;
 
+/// Every kind `feed_adapter` knows.
+pub const FEED_KINDS: [&str; 6] = ["polymarket-market", "chainlink-rtds", "okx-bbo-tbt", "binance-spot", "binance-perp", "coinbase"];
+
 /// The adapter of a configured `adapter` kind. `true`: the adapter carries books.
 pub fn feed_adapter(kind: &str) -> Option<(Box<dyn Adapter>, bool)> {
     match kind {
@@ -87,5 +90,6 @@ mod tests {
             assert!(engine_core::conformance::decodes(a.as_mut(), &frames).len() >= frames.len() - 1, "{kind}");
         }
         assert!(feed_adapter("binance").is_none());
+        assert!(FEED_KINDS.iter().all(|k| feed_adapter(k).is_some()));
     }
 }

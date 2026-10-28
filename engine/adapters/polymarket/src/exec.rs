@@ -41,11 +41,12 @@ pub fn read_creds(r: &Response) -> Option<Creds> {
 pub struct Answer { pub input: Input, pub back_off_s: Option<u64> }
 
 /// Reads one `POST /order` answer.
-pub fn read_answer(r: &Response) -> Answer {
+/// `back_off_s`: the wait asked by a 425/429 that names none (no Retry-After).
+pub fn read_answer(r: &Response, back_off_s: u64) -> Answer {
     #[derive(serde::Deserialize)]
     struct Body { #[serde(default)] success: bool, #[serde(default, rename = "errorMsg")] error_msg: String, #[serde(default, rename = "orderID")] order_id: String,
         #[serde(default)] status: String, #[serde(default, rename = "tradeIDs")] trade_ids: Vec<String>, #[serde(default)] error: Option<String> }
-    let back_off_s = matches!(r.status, 425 | 429).then_some(r.retry_after_s.unwrap_or(1));
+    let back_off_s = matches!(r.status, 425 | 429).then_some(r.retry_after_s.unwrap_or(back_off_s));
     // the raw answer is kept by the caller (`Sent::raw`) for the ledger
     let unknown = || Answer { input: Input::NoAnswer, back_off_s: None };
     // a 5xx says nothing about the order: a gateway may fail after the CLOB matched it
@@ -118,20 +119,24 @@ pub struct Clob {
     pub deadline: Duration,
     /// After the deadline, how long a late answer is still awaited on the same connection.
     pub grace: Duration,
+    /// Time for the keep-alive read (`warm`).
+    pub warm_timeout: Duration,
+    /// Wait after a 425/429 that names none.
+    pub back_off_s: u64,
     pub net: NetGuard,
     conn: Option<Conn>,
 }
 
 impl Clob {
     pub fn new(host: &str, port: u16, tls: bool, net: NetGuard) -> Self {
-        Clob { venue: HOST, host: host.into(), port, tls, deadline: Duration::from_millis(300), grace: Duration::from_secs(10), net, conn: None }
+        Clob { venue: HOST, host: host.into(), port, tls, deadline: Duration::from_millis(300), grace: Duration::from_secs(10), warm_timeout: Duration::from_secs(2), back_off_s: 1, net, conn: None }
     }
 
     /// Opens the connection if needed and keeps it alive with a cheap read; off the hot path.
     pub async fn warm(&mut self) -> Result<(), HttpError> {
         if self.conn.is_none() { self.conn = Some(Conn::new(dial(&self.host, self.port, self.tls).await?)); }
         let c = self.conn.as_mut().unwrap();
-        let r = tokio::time::timeout(Duration::from_secs(2), async { c.write(format!("GET /time HTTP/1.1\r\nHost: {}\r\n\r\n", self.venue).as_bytes()).await?; c.read().await }).await.unwrap_or(Err(HttpError::Timeout));
+        let r = tokio::time::timeout(self.warm_timeout, async { c.write(format!("GET /time HTTP/1.1\r\nHost: {}\r\n\r\n", self.venue).as_bytes()).await?; c.read().await }).await.unwrap_or(Err(HttpError::Timeout));
         if r.as_ref().map_or(true, |r| r.close) { self.conn = None; }
         r.map(|_| ())
     }
@@ -181,7 +186,7 @@ impl Clob {
         match answer {
             Ok(r) => {
                 sent.answered = Some(clock.now());
-                let a = read_answer(&r);
+                let a = read_answer(&r, self.back_off_s);
                 sent.back_off_s = a.back_off_s;
                 let _ = order.apply(a.input);
                 if r.close { self.conn = None; }
@@ -202,22 +207,22 @@ mod tests {
     #[test]
     fn answers_mean_what_the_sdk_says() {
         let ok = r#"{"errorMsg":"","makingAmount":"5","orderID":"0xabc","status":"matched","success":true,"takingAmount":"9.09","tradeIDs":["t1"],"transactionsHashes":[]}"#;
-        assert_eq!(read_answer(&r(200, ok)).input, Input::Accepted { id: "0xabc".into(), status: AckStatus::Matched, trades: vec!["t1".into()] });
+        assert_eq!(read_answer(&r(200, ok), 1).input, Input::Accepted { id: "0xabc".into(), status: AckStatus::Matched, trades: vec!["t1".into()] });
         let delayed = r#"{"errorMsg":"","makingAmount":"0","orderID":"0xabc","status":"delayed","success":true,"takingAmount":"0"}"#;
-        assert_eq!(read_answer(&r(200, delayed)).input, Input::Accepted { id: "0xabc".into(), status: AckStatus::Delayed, trades: vec![] });
+        assert_eq!(read_answer(&r(200, delayed), 1).input, Input::Accepted { id: "0xabc".into(), status: AckStatus::Delayed, trades: vec![] });
         // the real answer of a killed FAK (2026-10-17), and the SDK's other form
         let killed = r#"{"error":"no orders found to match with FAK order. FAK orders are partially filled or killed if no match is found."}"#;
-        assert!(matches!(read_answer(&r(400, killed)).input, Input::Rejected { killed: true, .. }));
-        assert!(matches!(read_answer(&r(200, r#"{"errorMsg":"","orderID":"0xabc","status":"unmatched","success":false}"#)).input, Input::Rejected { killed: true, .. }));
-        assert!(matches!(read_answer(&r(400, r#"{"error":"not enough balance / allowance"}"#)).input, Input::Rejected { killed: false, .. }));
-        assert!(matches!(read_answer(&r(200, r#"{"errorMsg":"invalid nonce","orderID":"","status":"","success":false}"#)).input, Input::Rejected { killed: false, .. }));
-        assert!(matches!(read_answer(&r(401, "Unauthorized")).input, Input::Rejected { killed: false, .. }));
+        assert!(matches!(read_answer(&r(400, killed), 1).input, Input::Rejected { killed: true, .. }));
+        assert!(matches!(read_answer(&r(200, r#"{"errorMsg":"","orderID":"0xabc","status":"unmatched","success":false}"#), 1).input, Input::Rejected { killed: true, .. }));
+        assert!(matches!(read_answer(&r(400, r#"{"error":"not enough balance / allowance"}"#), 1).input, Input::Rejected { killed: false, .. }));
+        assert!(matches!(read_answer(&r(200, r#"{"errorMsg":"invalid nonce","orderID":"","status":"","success":false}"#), 1).input, Input::Rejected { killed: false, .. }));
+        assert!(matches!(read_answer(&r(401, "Unauthorized"), 1).input, Input::Rejected { killed: false, .. }));
     }
 
     #[test]
     fn what_says_nothing_about_the_order_leaves_it_unknown() {
         for (s, b) in [(500, "{}"), (502, "<html>bad gateway</html>"), (503, ""), (504, "timeout"), (200, "not json"), (200, r#"{"success":true,"errorMsg":"","orderID":"0xabc","status":"weird"}"#)] {
-            assert_eq!(read_answer(&r(s, b)).input, Input::NoAnswer, "{s} {b}");
+            assert_eq!(read_answer(&r(s, b), 1).input, Input::NoAnswer, "{s} {b}");
         }
     }
 
@@ -247,9 +252,9 @@ mod tests {
 
     #[test]
     fn rate_limits_ask_to_wait() {
-        let a = read_answer(&Response { status: 429, body: b"{\"error\":\"too many requests\"}".to_vec(), retry_after_s: Some(7), close: false });
+        let a = read_answer(&Response { status: 429, body: b"{\"error\":\"too many requests\"}".to_vec(), retry_after_s: Some(7), close: false }, 1);
         assert!(matches!(a.input, Input::Rejected { killed: false, .. }));
         assert_eq!(a.back_off_s, Some(7));
-        assert_eq!(read_answer(&r(425, "")).back_off_s, Some(1));
+        assert_eq!(read_answer(&r(425, ""), 1).back_off_s, Some(1));
     }
 }

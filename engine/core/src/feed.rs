@@ -46,10 +46,20 @@ pub enum Out {
     Sent { source: SourceId, conn: u16, at: Stamp, text: String },
 }
 
-const TIMER: Duration = Duration::from_millis(100);
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_BACKOFF: Duration = Duration::from_secs(2);
-const STABLE: Duration = Duration::from_secs(10);
+/// The runner's settings, the same for every source (engine config `runtime.feed`).
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Timing {
+    /// Period of the silence check.
+    pub timer_ms: u64,
+    pub connect_timeout_ms: u64,
+    /// Wait before a reconnection while connections keep failing quickly: doubles from `min_backoff_ms` up to `max_backoff_ms`.
+    pub min_backoff_ms: u64,
+    pub max_backoff_ms: u64,
+    /// A connection that lived this long reconnects at once when it drops.
+    pub stable_ms: u64,
+}
+impl Default for Timing { fn default() -> Self { Timing { timer_ms: 100, connect_timeout_ms: 10_000, min_backoff_ms: 100, max_backoff_ms: 2_000, stable_ms: 10_000 } } }
 
 /// Runs one source until `out` is closed. Reconnects at once after a drop; backs off only while connections keep
 /// failing quickly.
@@ -60,8 +70,18 @@ pub async fn run(a: Box<dyn Adapter>, source: SourceId, topics: Vec<String>, clo
 /// `run`, plus, when `trace`, every frame received and written and every connection (`Out::Frame`, `Sent`,
 /// `Connected`), and unreadable frames whole. `conn`: index of this connection within its source, as traced.
 #[allow(clippy::too_many_arguments)]
-pub async fn run_with(mut a: Box<dyn Adapter>, source: SourceId, conn: u16, mut topics: Vec<String>, clock: Arc<Clock>, mut cmd: UnboundedReceiver<Cmd>, out: UnboundedSender<Out>, trace: bool) {
-    let mut sup = Supervisor::new(a.caps());
+pub async fn run_with(a: Box<dyn Adapter>, source: SourceId, conn: u16, topics: Vec<String>, clock: Arc<Clock>, cmd: UnboundedReceiver<Cmd>, out: UnboundedSender<Out>, trace: bool) {
+    let (silence, hb) = (a.caps().silence, a.heartbeat().map(|h| h.0));
+    run_tuned(a, source, conn, topics, clock, cmd, out, trace, Timing::default(), silence, hb).await
+}
+
+/// `run_with`, with the runner's settings, the source's silence and its heartbeat period given (the adapter's own
+/// are its defaults). A heartbeat period for a source without heartbeat is ignored.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_tuned(mut a: Box<dyn Adapter>, source: SourceId, conn: u16, mut topics: Vec<String>, clock: Arc<Clock>, mut cmd: UnboundedReceiver<Cmd>, out: UnboundedSender<Out>, trace: bool,
+    t: Timing, silence: Duration, heartbeat: Option<Duration>) {
+    let ms = Duration::from_millis;
+    let mut sup = Supervisor::new(Caps { silence, ..a.caps() });
     let mut backoff = Duration::ZERO;
     let mut events = Vec::with_capacity(64);
     let mut cmd_open = true;
@@ -70,9 +90,9 @@ pub async fn run_with(mut a: Box<dyn Adapter>, source: SourceId, conn: u16, mut 
         if out.is_closed() { return; }
         if !backoff.is_zero() { tokio::time::sleep(backoff).await; }
         let started = tokio::time::Instant::now();
-        let ws = match tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(a.url())).await {
+        let ws = match tokio::time::timeout(ms(t.connect_timeout_ms), tokio_tungstenite::connect_async(a.url())).await {
             Ok(Ok((ws, _))) => ws,
-            _ => { health(sup.on_disconnect(), &out, clock.now()); backoff = (backoff * 2).clamp(Duration::from_millis(100), MAX_BACKOFF); continue; }
+            _ => { health(sup.on_disconnect(), &out, clock.now()); backoff = (backoff * 2).clamp(ms(t.min_backoff_ms), ms(t.max_backoff_ms)); continue; }
         };
         let (mut tx, mut rx) = ws.split();
         sup.on_connect(clock.now().mono_ns);
@@ -80,10 +100,10 @@ pub async fn run_with(mut a: Box<dyn Adapter>, source: SourceId, conn: u16, mut 
         let sent = |f: &String, out: &UnboundedSender<Out>| if trace { let _ = out.send(Out::Sent { source, conn, at: clock.now(), text: f.clone() }); };
         let mut ok = true;
         for f in a.subscribe_all(&topics) { sent(&f, &out); ok &= tx.send(Message::text(f)).await.is_ok(); }
-        let hb = a.heartbeat();
+        let hb = a.heartbeat().map(|(p, text)| (heartbeat.unwrap_or(p), text));
         let mut hb_tick = tokio::time::interval(hb.as_ref().map_or(Duration::from_secs(3600), |h| h.0));
         hb_tick.tick().await;
-        let mut timer = tokio::time::interval(TIMER);
+        let mut timer = tokio::time::interval(ms(t.timer_ms));
         while ok {
             tokio::select! {
                 m = rx.next() => match m {
@@ -126,6 +146,6 @@ pub async fn run_with(mut a: Box<dyn Adapter>, source: SourceId, conn: u16, mut 
         let _ = tx.close().await;
         // a drop while valid is reported now; an already reported reason (silence, gap, decode) is kept as the cause
         if matches!(sup.health, Health::Valid) { health(sup.on_disconnect(), &out, clock.now()); } else { sup.reconnects += 1; }
-        backoff = if started.elapsed() >= STABLE { Duration::ZERO } else { (backoff * 2).clamp(Duration::from_millis(100), MAX_BACKOFF) };
+        backoff = if started.elapsed() >= ms(t.stable_ms) { Duration::ZERO } else { (backoff * 2).clamp(ms(t.min_backoff_ms), ms(t.max_backoff_ms)) };
     }
 }
