@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# start : installe / met a jour le tracer sur le serveur, choisit les sources, (re)demarre le service et verifie.
+# start : compile le tracer dans WSL, envoie le binaire + la config, (re)demarre le service et verifie.
 # Usage : start [--sources a,b,c] [--yes] [--config-only] [--interval <s>]
 #   --sources      sources actives (sinon menu a cases a cocher)
 #   --yes          pas de question de confirmation
@@ -35,11 +35,11 @@ cfg_list "$EX_TXT" >/dev/null || die "config.example.json : une source par ligne
 OLD_CFG=$(rsh "cat $R_CONFIG 2>/dev/null; true") || OLD_CFG=""
 STATE=$(svc_state); STATE=${STATE:-inconnu}
 FREE=$(free_bytes) || FREE=0; [[ "$FREE" =~ ^[0-9]+$ ]] || FREE=0
-info "service $UNIT : ${BLD}$STATE${RST}   |   disque libre : $(human "$FREE") (~$(( FREE / 4000000000 )) jours a ~4 Go/jour)"
+info "service $UNIT : ${BLD}$STATE${RST}   |   disque libre : $(human "$FREE") (~$(( FREE > 2000000000 ? (FREE - 2000000000) / 4000000000 : 0 )) jours avant la garde de 2 Go, a ~4 Go/jour ; disque de 30 Go => pull au moins tous les 5 jours)"
 if [ "$FREE" -lt 2000000000 ] && [ "$FREE" -gt 0 ]; then
   die "moins de 2 Go libres : le tracer s'arreterait de lui-meme (garde disque). Lancer d'abord : deploy/pull"
 fi
-[ "$FREE" -ge 8000000000 ] || warn "moins de 8 Go libres (~2 jours de Polymarket) : lancer deploy/pull"
+[ "$FREE" -ge 10000000000 ] || warn "moins de 10 Go libres (moins de 2 jours avant la garde du tracer) : lancer deploy/pull"
 
 # ---- 2. choix des sources -------------------------------------------------------------------------------------------
 BASE_TXT="$EX_TXT"; [ -n "$OLD_CFG" ] && cfg_list "$OLD_CFG" >/dev/null 2>&1 && BASE_TXT="$OLD_CFG"
@@ -75,7 +75,7 @@ for i in "${!ITEMS[@]}"; do
   if [ "${SEL[i]}" = 1 ]; then printf '  %s  %-24s %sACTIVE%s\n' "" "${ITEMS[i]}" "$GRN" "$RST"; else printf '  %s  %-24s %sdesactivee%s\n' "" "${ITEMS[i]}" "$DIM" "$RST"; fi
 done
 if [ "$CONFIG_ONLY" = 1 ]; then info "code           : inchange (--config-only)"
-else info "code           : envoi de engine/ + source-tracing/, compilation sur le serveur (cargo build --release -j1, plusieurs minutes)"; fi
+else info "code           : compilation du binaire dans WSL (release), envoi du seul binaire (verifie par sha256, remplacement atomique)"; fi
 info "config serveur : reecrite depuis config.example.json ($R_CONFIG)"
 case "$ACTION" in
   hot)     info "service        : relecture a chaud (pas de redemarrage)" ;;
@@ -89,33 +89,44 @@ NT=6; [ "$CONFIG_ONLY" = 1 ] && NT=4; N=0
 if [ "$CONFIG_ONLY" != 1 ]; then
   N=$((N+1)); etape $N $NT "installation du serveur (si necessaire)"
   if [ "${PT_TEST_NOSSH:-}" = 1 ]; then info "(mode test : ignore)"
-  elif rplain "id -u $RUSER >/dev/null 2>&1 && test -x $DATA/home/.cargo/bin/cargo && test -f /etc/systemd/system/$UNIT.service"; then ok "deja installe"
+  elif rplain "id -u $RUSER >/dev/null 2>&1 && command -v gzip >/dev/null && test -f /etc/systemd/system/$UNIT.service"; then ok "deja installe"
   else
-    info "premiere installation : apt, Rust, chrony, swap, unit systemd (quelques minutes)"
+    info "premiere installation : apt (gzip, chrony), utilisateur $RUSER, unit systemd (1-2 minutes)"
     tar -C "$DEPLOY_DIR" -cf - setup.sh "$UNIT.service" | rplain "rm -rf /tmp/st-setup && mkdir -p /tmp/st-setup && tar -xf - -C /tmp/st-setup" || die "envoi de setup.sh"
     rroot "bash /tmp/st-setup/setup.sh" || die "setup.sh a echoue (voir sortie ci-dessus)"
     ok "serveur installe"
   fi
 
-  N=$((N+1)); etape $N $NT "envoi du code (engine/ + source-tracing/)"
-  if [ "${PT_TEST_NOSSH:-}" = 1 ]; then info "(mode test : ignore)"
+  N=$((N+1)); etape $N $NT "compilation du tracer dans WSL (release)"
+  if [ -n "${ST_TEST_BIN:-}" ]; then BIN="$ST_TEST_BIN"; info "(mode test : binaire simule $BIN)"
   else
-    tar -C "$REPO_DIR" --exclude=target --exclude=node_modules --exclude=.git --exclude=.env \
-        --exclude=source-tracing/trace --exclude=source-tracing/config.json --exclude=source-tracing/convert \
-        -cf - engine source-tracing |
-      ssh -i "$SSH_KEY" "${SSH_OPTS[@]}" "$SSH_DEST" "sudo -n -u $RUSER tar -xf - -C $APP" || die "envoi du code"
-    ok "code envoye"
+    command -v wsl.exe >/dev/null || die "wsl.exe introuvable : WSL Ubuntu-24.04 est requis pour compiler (voir COMMANDES.md)"
+    WSL_SRC=$(printf '%s' "$ST_DIR" | sed -E 's|^/([a-zA-Z])/|/mnt/\L\1/|')
+    TOTC=$(grep -c '^name = ' "$ST_DIR/Cargo.lock"); LOG=$(mktemp); CNT=0
+    # barre = crates "Compiling" / paquets du Cargo.lock (borne haute : les paquets d'autres plateformes ne sont pas compiles)
+    MSYS_NO_PATHCONV=1 wsl.exe -d "${WSL_DISTRO:-Ubuntu-24.04}" -- bash "$WSL_SRC/deploy/build-wsl.sh" "$WSL_SRC" 2>&1 | tr -d '\r' | tee "$LOG" |
+      while IFS= read -r l; do
+        case "$l" in *Compiling*) CNT=$((CNT+1)); printf '\r\033[K  '; bar "$CNT" "$TOTC" 24; printf ' %s%s%s' "$DIM" "${l:0:60}" "$RST" ;; esac
+      done
+    printf '\r\033[K'
+    grep -q '^BINAIRE-OK ' "$LOG" || { tail -n 25 "$LOG"; die "compilation WSL echouee (journal complet : $LOG ; prerequis : voir COMMANDES.md)"; }
+    BIN="$ST_DIR/target/wsl-bin/source-tracing"; rm -f "$LOG"
   fi
+  [ -s "$BIN" ] || die "binaire introuvable : $BIN"
+  LSHA=$(sha256sum "$BIN" | cut -d' ' -f1); LSZ=$(wc -c < "$BIN" | tr -d ' ')
+  ok "binaire pret : $(human "$LSZ"), sha256 ${LSHA:0:16}..."
 
-  N=$((N+1)); etape $N $NT "compilation sur le serveur"
-  if [ "${PT_TEST_NOSSH:-}" = 1 ]; then info "(mode test : ignore)"
-  else
-    LOG=$(mktemp); set -o pipefail
-    rsh "set -e; export HOME=$DATA/home PATH=$DATA/home/.cargo/bin:\$PATH; cd $APP/source-tracing && cargo build --release -j1 2>&1; mkdir -p $APP/bin; install -m 755 $APP/source-tracing/target/release/source-tracing $APP/bin/source-tracing.new; mv -f $APP/bin/source-tracing.new $APP/bin/source-tracing" 2>&1 |
-      tee "$LOG" | while IFS= read -r l; do printf '\r\033[K  %s%s%s' "$DIM" "${l:0:90}" "$RST"; done
-    if [ "${PIPESTATUS[0]}" != 0 ]; then printf '\n'; tail -n 25 "$LOG"; die "compilation echouee (journal complet : $LOG)"; fi
-    printf '\r\033[K'; rm -f "$LOG"; ok "binaire installe dans $APP/bin/source-tracing"
-  fi
+  N=$((N+1)); etape $N $NT "envoi du binaire (fichier temporaire, verification sha256, remplacement atomique)"
+  TMPB="/tmp/st-bin.$$"
+  CHUNKS=$(( (LSZ + 1048575) / 1048576 ))
+  { for ((c=0;c<CHUNKS;c++)); do dd if="$BIN" bs=1048576 skip=$c count=1 2>/dev/null; printf '\r\033[K  ' >&2; bar $((c+1)) "$CHUNKS" 30 >&2; done; } |
+    rplain "cat > $TMPB" || die "envoi du binaire"
+  printf '\n'
+  RSHA=$(rplain "sha256sum $TMPB" | cut -d' ' -f1)
+  [ "$RSHA" = "$LSHA" ] || { rplain "rm -f $TMPB"; die "sha256 distant different ($RSHA) : envoi abandonne, binaire du serveur intact"; }
+  OWN="-o $RUSER -g $RUSER"; [ "${PT_TEST_NOSSH:-}" = 1 ] && OWN=""
+  rroot "install $OWN -m 755 $TMPB $APP/bin/source-tracing.new && mv -f $APP/bin/source-tracing.new $APP/bin/source-tracing && rm -f $TMPB" || die "installation du binaire"
+  ok "binaire installe dans $APP/bin/source-tracing (sha256 verifie)"
 fi
 
 N=$((N+1)); etape $N $NT "ecriture de la config"

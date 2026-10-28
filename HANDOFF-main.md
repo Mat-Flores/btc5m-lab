@@ -10,8 +10,8 @@
 - 2026-10-28 : `trading-gap.service` arrêté + désactivé sur dublin-dry-run et dublin-live (seul service applicatif, aucun docker, aucun cron utilisateur).
 
 ## En cours
-- Rapatriement FINI et vérifié (2026-10-28) : dry-run 10 012 fichiers, live 888 + /tmp sans données utiles (cache node, logs, `probe.pcap` non copié). Services arrêtés ; EC2 pas encore arrêtées (par l'utilisateur, console).
-- Déploiement tracing fait (`source-tracing/deploy/{start,stop,pull}`, `COMMANDES.md`, tests 30 PASS) ; jamais lancé contre le vrai serveur. `source-tracing` dépend de `../engine` : `start` envoie les deux. Compilation serveur `-j1` + swap 2 Go `[à vérifier]`. `docs/exploitation-deploiement.md` §6 cite encore l'ancien `deploy/`.
+- Rapatriement FINI et vérifié (2026-10-28) : dry-run 10 012 fichiers, live 888 + /tmp + p9/p10 (24 fichiers, sans wallet) dans `updown5m-staging/dublin-live/home`. Les 2 nœuds sont NETTOYÉS (service, /opt, /var/lib/tgap, tgap, node, rust, p9/p10, /tmp) ; l'utilisateur les stoppe dans la console.
+- Déploiement tracing commité : build WSL (`deploy/build-wsl.sh`) + envoi du binaire seul, garde disque 30 Go, tests 32 PASS. Jamais lancé en réel. Conversion des traces en cours (log `updown5m-staging/convert.log`).
 
 ## Reste à faire (dans l'ordre)
 1. Finir la recopie + `/tmp` live ; puis l'UTILISATEUR arrête les 2 EC2 (stop, pas terminate) dans la console AWS (pas d'aws CLI ici ; `shutdown` via SSH risqué si le comportement d'arrêt = terminate).
@@ -30,7 +30,7 @@
 
 ## Fichiers clés
 - `docs/contrats-migration.md` ; `docs/architecture-backtest.md` (cible backtest) ; `source-tracing/convert/MAPPING.md` ; `deploy/pull-traces`, `deploy/updown5m@.service`.
-- Instance tracing « Up&Down-Tracing » : `ubuntu@34.254.159.53`, clé `C:\Users\mathe\.ssh\Up&Down.pem` ; Ubuntu 26.04, 2 vCPU, 1,8 Gio RAM, disque 61 Go.
+- Instance tracing « Up&Down-Tracing » : `ubuntu@34.247.53.227`, clé `C:\Users\mathe\.ssh\Up&Down.pem` ; Ubuntu 26.04, 2 vCPU, 1,8 Gio RAM, disque 61 Go.
 - SERVEURS : dry-run `ubuntu@108.130.16.251` (`~/.ssh/dublin-dry-run.pem`), live `ubuntu@3.253.60.148` (`~/.ssh/dublin-live.pem`) ; données dans `/var/lib/tgap/data` (sudo).
 
 ## Commandes utiles

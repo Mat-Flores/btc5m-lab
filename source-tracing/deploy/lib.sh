@@ -15,7 +15,7 @@ R_CONFIG="${REMOTE_CONFIG:-$DATA/config.json}"
 # Le test fournit alors ST_TEST_DIR (faux serveur) et un faux systemctl dans le PATH.
 if [ "${PT_TEST_NOSSH:-}" = 1 ]; then
   : "${ST_TEST_DIR:?PT_TEST_NOSSH=1 exige ST_TEST_DIR}"
-  R_ROOT="$ST_TEST_DIR/trace"; R_CONFIG="$ST_TEST_DIR/config.json"; DATA="$ST_TEST_DIR"
+  R_ROOT="$ST_TEST_DIR/trace"; R_CONFIG="$ST_TEST_DIR/config.json"; DATA="$ST_TEST_DIR"; APP="$ST_TEST_DIR/opt"
 fi
 
 # ---- couleurs (desactivees si pas de terminal ou NO_COLOR) -------------------------------------------------

@@ -8,7 +8,8 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; D="$(dirname "$HERE")"
 T=$(mktemp -d); trap 'kill $(cat "$T/srv/pid" 2>/dev/null) 2>/dev/null; rm -rf "$T"' EXIT
 export PT_TEST_NOSSH=1 ST_TEST_DIR="$T/srv" NO_COLOR=1
-mkdir -p "$ST_TEST_DIR/trace" "$T/bin"
+mkdir -p "$ST_TEST_DIR/trace" "$ST_TEST_DIR/opt/bin" "$T/bin"
+head -c 2500000 /dev/urandom > "$T/fakebin"; export ST_TEST_BIN="$T/fakebin"   # simule la compilation WSL
 PASS=0; FAIL=0
 t() { if "$@"; then PASS=$((PASS+1)); echo "  PASS  $DESC"; else FAIL=$((FAIL+1)); echo "  FAIL  $DESC"; fi; }
 d() { DESC="$1"; shift; t "$@"; }
@@ -107,9 +108,12 @@ echo "-- stop total (--all) = arret du service"
 bash "$D/stop" --yes --all; rc=$?
 d "stop --all : code 0" test $rc = 0
 d "service inactive" test "$(cat "$ST_TEST_DIR/svc")" = inactive
-echo "-- start complet de nouveau (pas --config-only, mode test = pas de build) : redemarre, 8 sources"
+echo "-- start complet de nouveau (sans --config-only : binaire simule, envoi, remplacement atomique) : redemarre, 8 sources"
 bash "$D/start" --yes --sources "$(sed -nE 's/.*"name": *"([^"]+)".*/\1/p' "$D/../config.example.json" | paste -sd, -)" --interval 2 >/dev/null; rc=$?
 d "start : code 0, $N sources actives" bash -c "test $rc = 0 && test \$(grep -c '\"enabled\": *true' '$ST_TEST_DIR/config.json') = $N"
+same_bin() { [ "$(sha256sum "$ST_TEST_BIN" | cut -d" " -f1)" = "$(sha256sum "$ST_TEST_DIR/opt/bin/source-tracing" | cut -d" " -f1)" ] && [ ! -e "$ST_TEST_DIR/opt/bin/source-tracing.new" ] && ! ls /tmp/st-bin.* >/dev/null 2>&1; }
+d "binaire installe = binaire local (sha256), sans .new ni temporaire" same_bin
+d "service redemarre apres remplacement du binaire" grep -q "^start" "$ST_TEST_DIR/calls"
 echo "-- erreur : aucune source / fichier qui ne grossit pas"
 d "start sans source : refuse" bash -c "! bash '$D/start' --yes --sources '' >/dev/null 2>&1"
 bash "$D/stop" --yes --all >/dev/null 2>&1
