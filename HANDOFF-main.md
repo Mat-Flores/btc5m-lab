@@ -40,4 +40,5 @@
 - Parité : `updown5m-staging/engine-baseline/replay.sh after` puis `cmp` avec `replay-before-*`.
 
 ## Prochaine action
+EN COURS (2026-10-28) : un subagent opus/high implémente la phase A dans `backtest/` (+ constantes sorties de `engine/`). Si la session est coupée : vérifier l'état de `backtest/` (non commité), relancer ses scripts `backtest/scripts/*.sh` + `cargo test --workspace` engine + parité `replay.sh after`/`cmp`, puis commiter. Aucune trace convertie validée à ce jour (que des `.tmp`).
 Backtest phase A (nouvelle conversation, 2026-10-28) pendant que la conversion tourne dans l'ancienne session (log `updown5m-staging/convert.log`, process node `convert.mjs` ; fin = ligne « exit » dans la sortie et `source-tracing/convert-report.json` avec `conservation_ok`). Ne PAS supprimer le staging avant fin + bilan vérifié. Phase A : structure `backtest/`, SimVenue, boucle déterministe, `config/default.json` exhaustif (E2), un TOML commenté par stratégie (D13, constantes de stratégie de l'engine incluses, défauts inchangés), signal binance-spot configurable, non-régression maker à 0 écart. E1 = phase B, après validation de A.
