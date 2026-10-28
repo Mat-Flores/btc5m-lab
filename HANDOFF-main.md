@@ -20,6 +20,7 @@
 3. source-tracing : supprimer l'idée d'UI (contrat 3 caduc) ; `source-tracing/COMMANDES.md` + 3 commandes interactives et visuelles (couleurs, barres de progression) : lancer le tracing sur le serveur en choisissant les sources ; désactiver des sources choisies ; rapatrier les dernières sessions. Cible : NOUVELLE instance « Up&Down-Tracing » à Dublin (créée par l'utilisateur), plus dublin-dry-run.
 4. backtest/ : config globale JSON (`backtest/config/default.json`, E2) + UN fichier de config par stratégie en TOML (commentaires = description détaillée de la stratégie et de chaque paramètre) ; constantes de stratégie de l'engine (KEEP_NS, END/T_END/K_TAPE, WINDOW/FLOOR/PRIOR, HORIZON_S, capital0, claim) y passent, défauts inchangés. Signal par défaut binance-spot.
 5. README (8 + racine), phase 4 vérifs, `graphify update .`, rapport final.
+6. EN TOUT DERNIER (mission achevée) : purger de `docs/` tout ce qui contredit les décisions actuelles, pour un code et une doc parfaitement alignés. Les décisions et pistes écartées sont factorisées et synthétisées dans UN fichier dédié (ex. `docs/pistes-ecartees.md` : quoi, pourquoi écarté, date, preuve) pour que Claude ne réexplore pas ces pistes. Vérifier chaque affirmation de doc contre le code.
 
 ## Décisions et pièges
 - 2026-10-28 utilisateur : historique git laissé tel quel ; garder SA version de `CLAUDE.md` (noter l'écart au rapport) ; signal backtest binance-spot ms σ×1,3 configurable, moyenne Binance+Coinbase = option ; OKX reste enregistré.
