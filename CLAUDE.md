@@ -14,6 +14,42 @@ Rules:
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
 
+## Continuité de session (HANDOFF par branche)
+
+Objectif : pouvoir couper une session à tout moment (limite d'usage, fin de journée) et reprendre dans une session neuve sans recharger l'historique.
+
+### Nom du fichier
+- Le fichier de passation s'appelle `HANDOFF-<branche>.md`, à la racine du projet.
+- `<branche>` = résultat de `git branch --show-current`, avec les `/` remplacés par `-` (ex. `feature/auth` → `HANDOFF-feature-auth.md`).
+- Si la branche est `main` ou `master`, utilise `HANDOFF-main.md`.
+- Si le dépôt n'est pas un dépôt git ou si la branche est indéterminée (HEAD détachée), utilise `HANDOFF.md`.
+
+### Au début d'une session
+- Détermine la branche courante, puis lis `HANDOFF-<branche>.md` s'il existe, et reprends à « Prochaine action ». Ignore les `HANDOFF-*.md` des autres branches.
+- Ne relis pas tout le code : ouvre seulement les fichiers listés dans « Fichiers clés ».
+
+### Pendant la session
+- Mets à jour `HANDOFF-<branche>.md` après chaque étape significative (fonctionnalité terminée, décision importante, bug résolu, changement de direction), sans attendre que je le demande.
+- Réécris le fichier au lieu d'y ajouter à la suite : il doit rester sous ~60 lignes et refléter l'état actuel, pas l'historique.
+- Quand je dis « handoff » ou « sauvegarde le contexte », mets à jour le fichier de la branche courante immédiatement, puis confirme en une ligne.
+- Si je change de branche en cours de session, bascule sur le `HANDOFF-<nouvelle-branche>.md` correspondant.
+
+### Format du fichier
+- **Branche** : nom de la branche et branche de base (ex. `feature/auth`, depuis `main`).
+- **Objectif** : la tâche en 1-2 phrases.
+- **Fait** : ce qui est terminé et vérifié.
+- **Reste à faire** : liste courte, ordonnée.
+- **Décisions et pièges** : choix techniques et leur raison, erreurs à ne pas refaire, approches écartées.
+- **Fichiers clés** : chemins, avec une ligne sur le rôle de chacun.
+- **Commandes utiles** : build, tests, lancement, si spécifiques à la tâche.
+- **Prochaine action** : l'étape suivante, assez précise pour être exécutée sans contexte.
+
+### Règles
+- Ne mets dans le fichier que ce qui n'est pas déjà dans le code ou dans `git log`.
+- Pas de morceaux de code longs : référence le fichier et la ligne.
+- Les règles permanentes du projet vont dans ce `CLAUDE.md`, pas dans les fichiers HANDOFF.
+- Quand une branche est mergée, supprime son `HANDOFF-<branche>.md`.
+
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
