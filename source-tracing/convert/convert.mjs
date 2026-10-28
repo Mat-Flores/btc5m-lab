@@ -49,16 +49,20 @@ const sidToUs = (id) => { // "2026-10-14T20-43-50[_hôte]" -> µs, à la seconde
 };
 const secs = (x) => Number((x / 1e6).toFixed(6));
 
-/** Lit en flux les lignes d'un .jsonl.gz. Rend {truncated, error}. Une fin tronquée (Z_BUF_ERROR) est tolérée. */
+/** Lit en flux les lignes d'un .jsonl.gz. Rend {truncated, error, droppedTail}.
+ *  Fin tronquée tolérée : finishFlush SYNC_FLUSH ne lève aucune erreur et n'abandonne aucune donnée déjà décompressée (avec Z_FINISH,
+ *  l'itérateur jette le tampon à l'erreur, de façon non déterministe). La troncature est détectée en comparant le trailer gzip du fichier
+ *  (CRC32 + taille mod 2^32, 8 derniers octets) à ceux du flux décompressé. Limite : fichier multi-membres -> signalé tronqué à tort. */
 async function readLines(file, onLine) {
-  const gz = zlib.createGunzip({ chunkSize: 1 << 20 });
+  const gz = zlib.createGunzip({ chunkSize: 1 << 20, finishFlush: zlib.constants.Z_SYNC_FLUSH });
   const rs = fs.createReadStream(file, { highWaterMark: 1 << 20 });
   rs.on('error', (e) => gz.destroy(e));
   rs.pipe(gz);
   const dec = new StringDecoder('utf8');
-  let rest = '', truncated = false, error = null, droppedTail = false, stop = false;
+  let rest = '', truncated = false, error = null, droppedTail = false, stop = false, crc = 0, total = 0;
   try {
     for await (const chunk of gz) {
+      crc = zlib.crc32(chunk, crc); total += chunk.length;
       const s = rest + dec.write(chunk);
       let from = 0, i;
       while ((i = s.indexOf('\n', from)) >= 0) {
@@ -69,10 +73,15 @@ async function readLines(file, onLine) {
       if (stop) { rest = ''; break; }
       rest = s.slice(from);
     }
-  } catch (e) {
-    if (e.code === 'Z_BUF_ERROR') truncated = true; else { truncated = true; error = e.code || e.message; }
-  }
+  } catch (e) { truncated = true; error = e.code || e.message; }
   if (stop) { gz.destroy(); rs.destroy(); }
+  else if (!error) {
+    const fd = fs.openSync(file, 'r'); const t = Buffer.alloc(8);
+    const size = fs.fstatSync(fd).size;
+    if (size >= 8) fs.readSync(fd, t, 0, 8, size - 8);
+    fs.closeSync(fd);
+    truncated = size < 18 || t.readUInt32LE(0) !== crc || t.readUInt32LE(4) !== total % 2 ** 32;
+  }
   rest += dec.end();
   if (rest.length && !stop) {
     if (truncated) droppedTail = true; // fin tronquée : on s'arrête à la dernière ligne complète
