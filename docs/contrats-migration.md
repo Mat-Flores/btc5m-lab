@@ -196,6 +196,12 @@ Fixture commitée réduite (~3 fenêtres, < 20 Mo) ; run complet en lisant les p
   4) résultat documenté dans `docs/` (gain, risque de surajustement, valeurs retenues).
 - E2. UN fichier de config éditable qui stocke TOUS les paramètres du backtest : `backtest/config/default.json`. Il contient chaque paramètre du marché, des sources (retards de réception…), de l'exchange simulé (tous ceux du Contrat 2, plus toute constante de `sim.mjs` comme `MIN_SIZE`, `HOLD_Q`, `SILENCE`, aller simple…), du capital et des stratégies, avec sa valeur par défaut. Aucune constante cachée dans le code : le code lit le fichier. Un fichier de lot/sweep ne contient que les surcharges (fusion profonde sur `default.json`). Le fichier est documenté (`backtest/README.md` : chaque paramètre, unité, source de la valeur, `[à vérifier]`). Les autres outils gardent chacun leur fichier de config (`source-tracing/config.json`, config de l'engine), eux aussi exhaustifs.
 
+## Décisions utilisateur du 2026-10-28 (priment sur la spécification)
+- D10. Les 2 instances (dublin-dry-run, dublin-live) sont coupées entièrement : services arrêtés, puis EC2 arrêtées (stop). Wallets sans capital : aucune précaution particulière.
+- D11. Plus d'UI : le Contrat 3 est caduc. `source-tracing/` fournit à la place 3 commandes interactives et visuelles (lancer le tracing en choisissant les sources, désactiver des sources, rapatrier les dernières sessions), répertoriées dans `source-tracing/COMMANDES.md`. Il sera déployé seul sur une nouvelle instance « Up&Down-Tracing » (Dublin).
+- D12. Les traces converties sont rangées dans le projet (`source-tracing/trace/`, non commitées).
+- D13. Backtest : config globale `backtest/config/default.json` (E2) + un fichier de config par stratégie en TOML, commenté (description de la stratégie et de chaque paramètre). Signal par défaut : binance-spot ms, `sigmaMult` 1,3, configurable ; moyenne Binance+Coinbase en option.
+
 ## Règles communes à tous les subagents
 - Réponds en français. Tous les .md en français.
 - NEVER modifier le dépôt source (lecture et copie seulement ; pas de build, pas de npm install, pas d'`explore.mjs`, rien n'écrit dans son `target/`, `packs/`, `results/`).

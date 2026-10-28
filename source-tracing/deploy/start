@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# start : installe / met a jour le tracer sur le serveur, choisit les sources, (re)demarre le service et verifie.
+# Usage : start [--sources a,b,c] [--yes] [--config-only] [--interval <s>]
+#   --sources      sources actives (sinon menu a cases a cocher)
+#   --yes          pas de question de confirmation
+#   --config-only  ne touche pas au code : ecrit la config ; si le service tourne et que seul "enabled" change,
+#                  la relecture a chaud du tracer (mtime <= 1 s) suffit, pas de redemarrage
+#   --interval     secondes entre les 2 mesures de taille du fichier du jour (defaut 15)
+set -uo pipefail
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+SRC_NAMES=""; ASSUME_YES=0; CONFIG_ONLY=0; INTERVAL=15
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --sources) shift; SRC_NAMES="${1:-}" ;;
+    --yes|-y) ASSUME_YES=1 ;;
+    --config-only) CONFIG_ONLY=1 ;;
+    --interval) shift; INTERVAL="${1:-}" ;;
+    -h|--help) sed -n '2,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "option inconnue : $1 (voir --help)" ;;
+  esac
+  shift
+done
+[[ "$INTERVAL" =~ ^[0-9]+$ ]] || die "--interval attend un nombre entier de secondes"
+
+EXAMPLE="$ST_DIR/config.example.json"
+[ -f "$EXAMPLE" ] || die "introuvable : $EXAMPLE"
+load_env
+title "start : tracing -> $SSH_DEST (host_id=$HOST_ID)"
+
+# ---- 1. etat du serveur -----------------------------------------------------------------------------------------
+check_conn
+EX_TXT=$(cat "$EXAMPLE")
+cfg_list "$EX_TXT" >/dev/null || die "config.example.json : une source par ligne avec name/adapter/enabled attendue"
+OLD_CFG=$(rsh "cat $R_CONFIG 2>/dev/null; true") || OLD_CFG=""
+STATE=$(svc_state); STATE=${STATE:-inconnu}
+FREE=$(free_bytes) || FREE=0; [[ "$FREE" =~ ^[0-9]+$ ]] || FREE=0
+info "service $UNIT : ${BLD}$STATE${RST}   |   disque libre : $(human "$FREE") (~$(( FREE / 4000000000 )) jours a ~4 Go/jour)"
+if [ "$FREE" -lt 2000000000 ] && [ "$FREE" -gt 0 ]; then
+  die "moins de 2 Go libres : le tracer s'arreterait de lui-meme (garde disque). Lancer d'abord : deploy/pull"
+fi
+[ "$FREE" -ge 8000000000 ] || warn "moins de 8 Go libres (~2 jours de Polymarket) : lancer deploy/pull"
+
+# ---- 2. choix des sources -------------------------------------------------------------------------------------------
+BASE_TXT="$EX_TXT"; [ -n "$OLD_CFG" ] && cfg_list "$OLD_CFG" >/dev/null 2>&1 && BASE_TXT="$OLD_CFG"
+ITEMS=(); SEL=()
+while read -r nm en; do ITEMS+=("$nm"); if [ "$en" = true ]; then SEL+=(1); else SEL+=(0); fi; done < <(cfg_list "$EX_TXT")
+# preselection : etat actuel du serveur pour les sources qu'il connait, sinon valeur de l'exemple
+if [ -n "$OLD_CFG" ]; then
+  while read -r nm en; do for i in "${!ITEMS[@]}"; do [ "${ITEMS[i]}" = "$nm" ] && { [ "$en" = true ] && SEL[i]=1 || SEL[i]=0; }; done; done < <(cfg_list "$OLD_CFG" 2>/dev/null || true)
+fi
+if [ -n "$SRC_NAMES" ]; then apply_names "$SRC_NAMES"
+else
+  title "sources a activer"
+  select_multi || { info "annule."; exit 1; }
+fi
+NSEL=0; for v in "${SEL[@]}"; do NSEL=$((NSEL+v)); done
+[ "$NSEL" -gt 0 ] || die "aucune source cochee : pour tout arreter, utiliser deploy/stop"
+
+NEW_CFG=$(printf '%s\n' "$EX_TXT" | sed -E "s|(\"host_id\" *: *\")[^\"]*|\1$HOST_ID|; s|(\"root\" *: *\")[^\"]*|\1$R_ROOT|")
+for i in "${!ITEMS[@]}"; do if [ "${SEL[i]}" = 1 ]; then v=true; else v=false; fi; NEW_CFG=$(cfg_set "$NEW_CFG" "${ITEMS[i]}" "$v"); done
+
+# decision de relance : relecture a chaud seulement si service actif, --config-only, et seul "enabled" differe
+if [ "$STATE" = active ] && [ "$CONFIG_ONLY" = 1 ] && [ -n "$OLD_CFG" ] && [ "$(cfg_shape "$OLD_CFG")" = "$(cfg_shape "$NEW_CFG")" ]; then
+  ACTION=hot
+elif [ "$STATE" = active ]; then ACTION=restart
+else ACTION=start; fi
+
+# ---- 3. recapitulatif et confirmation ---------------------------------------------------------------------
+title "recapitulatif"
+info "serveur        : $SSH_DEST"
+info "host_id        : $HOST_ID"
+info "racine traces  : $R_ROOT"
+for i in "${!ITEMS[@]}"; do
+  if [ "${SEL[i]}" = 1 ]; then printf '  %s  %-24s %sACTIVE%s\n' "" "${ITEMS[i]}" "$GRN" "$RST"; else printf '  %s  %-24s %sdesactivee%s\n' "" "${ITEMS[i]}" "$DIM" "$RST"; fi
+done
+if [ "$CONFIG_ONLY" = 1 ]; then info "code           : inchange (--config-only)"
+else info "code           : envoi de engine/ + source-tracing/, compilation sur le serveur (cargo build --release -j1, plusieurs minutes)"; fi
+info "config serveur : reecrite depuis config.example.json ($R_CONFIG)"
+case "$ACTION" in
+  hot)     info "service        : relecture a chaud (pas de redemarrage)" ;;
+  restart) info "service        : REDEMARRAGE (le tracer ferme proprement ses fichiers, coupure de quelques secondes)" ;;
+  start)   info "service        : demarrage" ;;
+esac
+confirm "Lancer ?" || { info "annule."; exit 1; }
+
+# ---- 4. execution ---------------------------------------------------------------------------------------------------
+NT=6; [ "$CONFIG_ONLY" = 1 ] && NT=4; N=0
+if [ "$CONFIG_ONLY" != 1 ]; then
+  N=$((N+1)); etape $N $NT "installation du serveur (si necessaire)"
+  if [ "${PT_TEST_NOSSH:-}" = 1 ]; then info "(mode test : ignore)"
+  elif rplain "id -u $RUSER >/dev/null 2>&1 && test -x $DATA/home/.cargo/bin/cargo && test -f /etc/systemd/system/$UNIT.service"; then ok "deja installe"
+  else
+    info "premiere installation : apt, Rust, chrony, swap, unit systemd (quelques minutes)"
+    tar -C "$DEPLOY_DIR" -cf - setup.sh "$UNIT.service" | rplain "rm -rf /tmp/st-setup && mkdir -p /tmp/st-setup && tar -xf - -C /tmp/st-setup" || die "envoi de setup.sh"
+    rroot "bash /tmp/st-setup/setup.sh" || die "setup.sh a echoue (voir sortie ci-dessus)"
+    ok "serveur installe"
+  fi
+
+  N=$((N+1)); etape $N $NT "envoi du code (engine/ + source-tracing/)"
+  if [ "${PT_TEST_NOSSH:-}" = 1 ]; then info "(mode test : ignore)"
+  else
+    tar -C "$REPO_DIR" --exclude=target --exclude=node_modules --exclude=.git --exclude=.env \
+        --exclude=source-tracing/trace --exclude=source-tracing/config.json --exclude=source-tracing/convert \
+        -cf - engine source-tracing |
+      ssh -i "$SSH_KEY" "${SSH_OPTS[@]}" "$SSH_DEST" "sudo -n -u $RUSER tar -xf - -C $APP" || die "envoi du code"
+    ok "code envoye"
+  fi
+
+  N=$((N+1)); etape $N $NT "compilation sur le serveur"
+  if [ "${PT_TEST_NOSSH:-}" = 1 ]; then info "(mode test : ignore)"
+  else
+    LOG=$(mktemp); set -o pipefail
+    rsh "set -e; export HOME=$DATA/home PATH=$DATA/home/.cargo/bin:\$PATH; cd $APP/source-tracing && cargo build --release -j1 2>&1; mkdir -p $APP/bin; install -m 755 $APP/source-tracing/target/release/source-tracing $APP/bin/source-tracing.new; mv -f $APP/bin/source-tracing.new $APP/bin/source-tracing" 2>&1 |
+      tee "$LOG" | while IFS= read -r l; do printf '\r\033[K  %s%s%s' "$DIM" "${l:0:90}" "$RST"; done
+    if [ "${PIPESTATUS[0]}" != 0 ]; then printf '\n'; tail -n 25 "$LOG"; die "compilation echouee (journal complet : $LOG)"; fi
+    printf '\r\033[K'; rm -f "$LOG"; ok "binaire installe dans $APP/bin/source-tracing"
+  fi
+fi
+
+N=$((N+1)); etape $N $NT "ecriture de la config"
+cfg_push "$NEW_CFG" || die "ecriture de $R_CONFIG"
+BACK=$(rsh "cat $R_CONFIG") || die "relecture de la config"
+[ "$BACK" = "$NEW_CFG" ] || die "la config relue sur le serveur differe de celle envoyee"
+ok "config ecrite et relue ($NSEL source(s) active(s))"
+
+N=$((N+1)); etape $N $NT "service $UNIT : $ACTION"
+case "$ACTION" in
+  hot)     info "attente de la relecture a chaud (2 s)"; sleep 2 ;;
+  restart) rroot "systemctl enable $UNIT >/dev/null 2>&1; systemctl restart $UNIT" || die "systemctl restart a echoue" ;;
+  start)   rroot "systemctl enable $UNIT >/dev/null 2>&1; systemctl start $UNIT" || die "systemctl start a echoue" ;;
+esac
+
+N=$((N+1)); etape $N $NT "verification"
+ST=""; for _ in 1 2 3 4 5 6 7 8 9 10; do ST=$(svc_state); [ "$ST" = active ] && break; sleep 1; done
+if [ "$ST" != active ]; then
+  err "le service n'est pas actif (etat : ${ST:-inconnu})"; rroot "journalctl -u $UNIT -n 15 --no-pager 2>/dev/null; true" | sed 's/^/    /'; exit 1
+fi
+ok "service actif"
+sleep 3
+S1=$(today_sizes) || S1=""
+printf '  mesure 1 prise ; seconde mesure dans %ss ' "$INTERVAL"
+for ((s=1;s<=INTERVAL;s++)); do sleep 1; printf '\r  mesure 1 prise ; seconde mesure dans %2ss  ' "$((INTERVAL-s))"; bar "$s" "$INTERVAL" 20; done; printf '\n'
+S2=$(today_sizes) || S2=""
+T1=0; T2=0; BAD=0
+printf '\n  %-24s %12s %12s %10s\n' source "mesure 1" "mesure 2" "delta"
+for i in "${!ITEMS[@]}"; do
+  [ "${SEL[i]}" = 1 ] || continue
+  nm=${ITEMS[i]}
+  a=$(printf '%s\n' "$S1" | awk -v n="$nm" '$2==n{print $1}'); a=${a:-0}
+  b=$(printf '%s\n' "$S2" | awk -v n="$nm" '$2==n{print $1}'); b=${b:-0}
+  T1=$((T1+a)); T2=$((T2+b))
+  if [ "$b" -gt "$a" ]; then c=$GRN; m="+$((b-a))"; else c=$YEL; m="stable"; BAD=$((BAD+1)); fi
+  printf '  %-24s %12s %12s %s%10s%s\n' "$nm" "$a" "$b" "$c" "$m" "$RST"
+done
+if [ "$T2" -gt "$T1" ]; then ok "les fichiers du jour grossissent ($(human $((T2-T1))) en ${INTERVAL}s)"
+else err "aucune croissance des fichiers du jour sur ${INTERVAL}s"; rroot "journalctl -u $UNIT -n 15 --no-pager 2>/dev/null; true" | sed 's/^/    /'; exit 1; fi
+[ "$BAD" = 0 ] || warn "$BAD source(s) stable(s) : gzip bufferise, une source peu bavarde peut mettre plus de ${INTERVAL}s a ecrire un bloc ; relancer avec --interval 60 pour confirmer"
+printf '\n%sTermine.%s Rapatrier les donnees : deploy/pull\n' "$BLD$GRN" "$RST"

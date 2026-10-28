@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# stop : affiche les sources actives du serveur, en desactive une partie (relecture a chaud, service inchange)
+# ou toutes (= arret du service), puis verifie l'etat final.
+# Usage : stop [--sources a,b] [--all] [--yes]
+#   --sources  sources a desactiver (sinon menu a cases a cocher)
+#   --all      arreter le service (toutes les sources)
+set -uo pipefail
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+SRC_NAMES=""; ALL=0; ASSUME_YES=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --sources) shift; SRC_NAMES="${1:-}" ;;
+    --all) ALL=1 ;;
+    --yes|-y) ASSUME_YES=1 ;;
+    -h|--help) sed -n '2,7p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "option inconnue : $1 (voir --help)" ;;
+  esac
+  shift
+done
+
+load_env
+title "stop : tracing sur $SSH_DEST"
+check_conn
+CFG=$(rsh "cat $R_CONFIG 2>/dev/null; true") || CFG=""
+[ -n "$CFG" ] || die "pas de config sur le serveur ($R_CONFIG) : rien n'a ete demarre avec deploy/start"
+LIST=$(cfg_list "$CFG") || die "config serveur non reconnue (une source par ligne attendue)"
+STATE=$(svc_state); STATE=${STATE:-inconnu}
+info "service $UNIT : ${BLD}$STATE${RST}"
+
+ITEMS=(); SEL=()
+while read -r nm en; do
+  if [ "$en" = true ]; then ITEMS+=("$nm"); SEL+=(0); printf '  %sactive%s      %s\n' "$GRN" "$RST" "$nm"
+  else printf '  %sdesactivee%s  %s\n' "$DIM" "$RST" "$nm"; fi
+done <<< "$LIST"
+NACT=${#ITEMS[@]}
+if [ "$NACT" = 0 ] && [ "$STATE" != active ]; then ok "rien a faire : aucune source active, service $STATE"; exit 0; fi
+
+if [ "$ALL" = 1 ]; then for i in "${!ITEMS[@]}"; do SEL[i]=1; done
+elif [ -n "$SRC_NAMES" ]; then apply_names "$SRC_NAMES"
+else
+  [ "$NACT" -gt 0 ] || { info "aucune source active : le service tourne a vide, --all pour l'arreter"; }
+  title "sources a DESACTIVER (tout cocher = arreter le service)"
+  select_multi || { info "annule."; exit 1; }
+fi
+NSEL=0; for v in "${SEL[@]}"; do NSEL=$((NSEL+v)); done
+[ "$NSEL" -gt 0 ] || { info "rien de coche, rien a faire."; exit 0; }
+if [ "$NSEL" = "$NACT" ]; then MODE=service; else MODE=partial; fi
+
+title "recapitulatif"
+for i in "${!ITEMS[@]}"; do [ "${SEL[i]}" = 1 ] && info "${RED}-${RST} ${ITEMS[i]}" || info "${GRN}=${RST} ${ITEMS[i]} (reste active)"; done
+if [ "$MODE" = service ]; then info "action : ARRET du service $UNIT (fermeture propre des fichiers du jour ; la config reste telle quelle)"
+else info "action : desactivation a chaud dans $R_CONFIG, service inchange (le tracer ecrit disconnect{disabled} + gap{disabled})"; fi
+confirm "Appliquer ?" || { info "annule."; exit 1; }
+
+if [ "$MODE" = service ]; then
+  title "arret du service"
+  rroot "systemctl stop $UNIT" || die "systemctl stop a echoue"
+  ST=$(svc_state)
+  if [ "$ST" = active ] || [ "$ST" = activating ] || [ "$ST" = deactivating ]; then die "le service est encore $ST"; fi
+  ok "service ${ST:-arrete} (etat final)"
+  A=$(today_sizes | awk '{s+=$1} END{print s+0}'); sleep 2; B=$(today_sizes | awk '{s+=$1} END{print s+0}')
+  if [ "$A" = "$B" ]; then ok "les fichiers du jour ne grossissent plus ($B octets)"; else err "les fichiers grossissent encore ($A -> $B)"; exit 1; fi
+  printf '\n%sTermine.%s Les sources restent marquees comme actives dans la config : deploy/start redemarre le tout.\n' "$BLD$GRN" "$RST"
+  exit 0
+fi
+
+title "desactivation a chaud"
+NEW="$CFG"
+for i in "${!ITEMS[@]}"; do [ "${SEL[i]}" = 1 ] && NEW=$(cfg_set "$NEW" "${ITEMS[i]}" false); done
+cfg_push "$NEW" || die "ecriture de $R_CONFIG"
+BACK=$(rsh "cat $R_CONFIG") || die "relecture de la config"
+[ "$BACK" = "$NEW" ] || die "la config relue differe de celle envoyee"
+ok "config ecrite et relue"
+BAD=0
+for i in "${!ITEMS[@]}"; do
+  [ "${SEL[i]}" = 1 ] || continue
+  nm=${ITEMS[i]}
+  [ "$(cfg_list "$BACK" | awk -v n="$nm" '$1==n{print $2}')" = false ] && ok "config : $nm = desactivee" || { err "config : $nm toujours active"; BAD=1; }
+done
+if [ "$STATE" = active ]; then
+  info "attente de la relecture a chaud par le tracer (status.json, jusqu'a 8 s)"
+  for i in "${!ITEMS[@]}"; do
+    [ "${SEL[i]}" = 1 ] || continue
+    nm=${ITEMS[i]}; seen=0
+    for _ in 1 2 3 4 5 6 7 8; do
+      if rsh "cat $R_ROOT/status.json 2>/dev/null; true" | grep -Eq "\"name\" *: *\"$nm\" *, *\"enabled\" *: *false"; then seen=1; break; fi
+      sleep 1
+    done
+    [ $seen = 1 ] && ok "tracer : $nm = desactivee (status.json)" || { err "tracer : $nm non confirmee par status.json"; BAD=1; }
+  done
+else warn "service $STATE : la config est a jour, la desactivation s'appliquera au prochain demarrage"; fi
+[ "$BAD" = 0 ] || exit 1
+printf '\n%sTermine.%s\n' "$BLD$GRN" "$RST"

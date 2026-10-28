@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# pull : rapatrie les jours VALIDES (manifeste present ; jamais le jour UTC en cours ni un .part-*), verifie taille + sha256
+# en local, et ne supprime cote serveur (donnees puis manifeste) qu'apres verification reussie (libere le disque de 30 Go).
+# Sans rsync : ssh + cat. Idempotent ; un .tmp local orphelin est supprime et retelecharge.
+# Usage : pull [--dry-run] [--keep] [--yes] [--local <dossier>]
+#   --dry-run  affiche le plan, ne telecharge ni ne supprime rien
+#   --keep     ne supprime rien cote serveur
+#   --local    cible (defaut : source-tracing/trace/)
+set -uo pipefail
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+DRY=0; KEEP=0; ASSUME_YES=0; LOCAL="$ST_DIR/trace"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY=1 ;;
+    --keep) KEEP=1 ;;
+    --yes|-y) ASSUME_YES=1 ;;
+    --local) shift; LOCAL="${1:-}" ;;
+    -h|--help) sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "option inconnue : $1 (voir --help)" ;;
+  esac
+  shift
+done
+[ -n "$LOCAL" ] || die "--local attend un dossier"
+case "$R_ROOT" in /?*) [ "$R_ROOT" != / ] || die "racine distante invalide" ;; *) die "racine distante invalide" ;; esac
+
+load_env
+title "pull : $SSH_DEST -> $LOCAL"
+check_conn
+mkdir -p "$LOCAL" || exit 1
+LOCK="$LOCAL/.pull.lock"
+mkdir "$LOCK" 2>/dev/null || die "un autre pull tourne (ou lock orphelin a supprimer a la main) : $LOCK"
+BGPID=""
+cleanup() { [ -n "$BGPID" ] && kill "$BGPID" 2>/dev/null; rmdir "$LOCK" 2>/dev/null; return 0; }
+trap cleanup EXIT; trap 'printf "\n"; err "interrompu (les .tmp seront nettoyes au prochain pull)"; exit 130' INT TERM
+
+sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+size_of() { wc -c < "$1" | tr -d ' '; }
+# sync <fichier> echoue sous Git Bash (Permission denied) : repli sur le sync global
+flush() { sync -- "$@" 2>/dev/null || sync; }
+
+# ---- plan : un seul aller-retour ssh pour tous les manifestes ----------------------------------------------------
+TODAY=$(today_utc) || die "heure du serveur illisible"
+RAW=$(rsh "cd $R_ROOT && find . -mindepth 4 -maxdepth 4 -type f -name \"*.manifest.json\" | sort | while read f; do echo \"@@@ \$f\"; cat -- \"\$f\"; echo; done") || die "listage serveur"
+
+PM=(); PD=(); PB=(); PS=(); PH=(); PJ=()   # manifeste, donnees, octets, sha, deja-ok, corps manifeste
+cur=""; body=""; NCUR=0; NIGN=0
+flush_entry() {
+  [ -n "$cur" ] || return 0
+  local m="${cur#./}" base day sha byt d
+  if ! [[ "$m" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*/[0-9]{4}/[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}[A-Za-z0-9._-]*\.manifest\.json$ ]] || [[ "$m" == *..* ]]; then
+    NIGN=$((NIGN+1)); return 0
+  fi
+  base=$(basename "$m"); day=${base:0:10}
+  [ "$day" != "$TODAY" ] || { NCUR=$((NCUR+1)); return 0; }
+  sha=$(printf '%s' "$body" | sed -nE 's/.*"sha256" *: *"([0-9a-f]{64})".*/\1/p' | head -1)
+  byt=$(printf '%s' "$body" | tr -d '\n' | sed -nE 's/.*"bytes" *: *([0-9]+).*/\1/p' | head -1)
+  if [ -z "$sha" ] || [ -z "$byt" ]; then warn "manifeste sans sha256/bytes, ignore : $m"; NIGN=$((NIGN+1)); return 0; fi
+  d="${m%.manifest.json}.jsonl.gz"
+  PM+=("$m"); PD+=("$d"); PB+=("$byt"); PS+=("$sha"); PJ+=("$body")
+  if [ -f "$LOCAL/$d" ] && [ "$(size_of "$LOCAL/$d")" = "$byt" ] && [ "$(sha_of "$LOCAL/$d")" = "$sha" ]; then PH+=(1); else PH+=(0); fi
+}
+while IFS= read -r line; do
+  if [[ "$line" == "@@@ "* ]]; then flush_entry; cur="${line#@@@ }"; body=""; else body+="$line"$'\n'; fi
+done <<< "$RAW"
+flush_entry
+
+N=${#PM[@]}; TODO=0; TOTB=0
+for ((i=0;i<N;i++)); do [ "${PH[i]}" = 1 ] || { TODO=$((TODO+1)); TOTB=$((TOTB+PB[i])); }; done
+
+title "plan"
+if [ "$N" = 0 ]; then
+  info "aucun jour valide a rapatrier (jour en cours ignore : $NCUR, ignores : $NIGN)."
+  exit 0
+fi
+printf '  %-62s %10s  %s\n' fichier taille etat
+for ((i=0;i<N;i++)); do
+  if [ "${PH[i]}" = 1 ]; then st="${DIM}deja present et verifie${RST}"; else st="${YEL}a telecharger${RST}"; fi
+  printf '  %-62s %10s  %s\n' "${PD[i]}" "$(human "${PB[i]}")" "$st"
+done
+info "total a telecharger : $TODO fichier(s), $(human "$TOTB") ; jour UTC en cours ($TODAY) ignore : $NCUR"
+if [ "$DRY" = 1 ]; then info "[dry-run] rien n'est telecharge ni supprime."; exit 0; fi
+if [ "$KEEP" = 1 ]; then info "apres verification sha256 : le serveur est laisse intact (--keep)"
+else info "apres verification sha256 de chaque fichier : suppression cote serveur (donnees puis manifeste)"; fi
+confirm "Lancer ?" || { info "annule."; exit 1; }
+
+# ---- execution ------------------------------------------------------------------------------------------------------
+NOK=0; NSKIP=0; NFAIL=0; NDEL=0; DONEB=0; K=0
+fail() { printf '\r\033[K'; err "$*"; NFAIL=$((NFAIL+1)); }
+draw() { # draw <octets du fichier courant> <total du fichier>
+  printf '\r\033[K  fichier '; bar "$1" "$2" 16
+  printf ' %s/%s | total ' "$(human "$1")" "$(human "$2")"; bar "$((DONEB + $1))" "$TOTB" 16
+  printf ' (%d/%d)' "$K" "$TODO"
+}
+for ((i=0;i<N;i++)); do
+  M=${PM[i]}; D=${PD[i]}; BYT=${PB[i]}; SHA=${PS[i]}; MAN=${PJ[i]}
+  LD="$LOCAL/$D"; LM="$LOCAL/$M"; mkdir -p "$(dirname "$LD")"
+  rm -f "$LD.tmp" "$LM.tmp"            # .tmp orphelin (interruption) : jamais reutilise
+  printf '\n  %s%s%s\n' "$BLD" "$D" "$RST"
+  if [ "${PH[i]}" = 1 ]; then
+    NSKIP=$((NSKIP+1)); ok "deja present et verifie ($BYT octets)"
+    [ -f "$LM" ] || { printf '%s' "$MAN" > "$LM.tmp" && mv -f "$LM.tmp" "$LM"; }
+  else
+    K=$((K+1))
+    rsh "cat -- $R_ROOT/$D" > "$LD.tmp" &
+    BGPID=$!
+    while kill -0 "$BGPID" 2>/dev/null; do draw "$(size_of "$LD.tmp")" "$BYT"; sleep 0.2; done
+    wait "$BGPID"; RC=$?; BGPID=""
+    if [ $RC != 0 ]; then rm -f "$LD.tmp"; fail "telechargement (code $RC)"; continue; fi
+    draw "$(size_of "$LD.tmp")" "$BYT"; printf '\n'
+    if [ "$(size_of "$LD.tmp")" != "$BYT" ] || [ "$(sha_of "$LD.tmp")" != "$SHA" ]; then
+      rm -f "$LD.tmp"; fail "taille ou sha256 different du manifeste (serveur intact)"; continue
+    fi
+    printf '%s' "$MAN" > "$LM.tmp" && mv -f "$LD.tmp" "$LD" && mv -f "$LM.tmp" "$LM" || { fail "renommage local"; continue; }
+    NOK=$((NOK+1)); DONEB=$((DONEB+BYT)); ok "sha256 verifie"
+  fi
+  [ "$KEEP" = 1 ] && continue
+  flush "$LD" "$LM" || { fail "sync disque local"; continue; }
+  # suppression : exactement ces deux chemins, donnees d'abord, manifeste (point de validation) ensuite
+  if rsh "cd $R_ROOT && rm -f -- \"$D\" && rm -f -- \"$M\""; then NDEL=$((NDEL+1)); ok "supprime cote serveur"
+  else fail "suppression serveur"; fi
+done
+
+title "bilan"
+info "telecharges OK=$NOK, deja presents=$NSKIP, echecs=$NFAIL, octets telecharges=$DONEB, supprimes serveur=$NDEL, jour en cours ignores=$NCUR"
+[ "$NFAIL" = 0 ] && { printf '%sTermine.%s Donnees dans %s\n' "$BLD$GRN" "$RST" "$LOCAL"; exit 0; }
+err "$NFAIL echec(s) : relancer deploy/pull (idempotent, rien n'est perdu cote serveur tant que le sha256 n'est pas verifie)"; exit 1

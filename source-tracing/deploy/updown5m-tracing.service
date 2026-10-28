@@ -1,0 +1,29 @@
+# Unit du tracer (installee par setup.sh, active mais demarree par deploy/start).
+[Unit]
+Description=updown5m source-tracing
+After=network-online.target chrony.service
+Wants=network-online.target
+
+[Service]
+User=tgap
+Group=tgap
+WorkingDirectory=/opt/updown5m
+ExecStart=/opt/updown5m/bin/source-tracing --config /var/lib/updown5m/config.json
+Restart=always
+RestartSec=3
+# SIGTERM : le tracer ecrit disconnect{shutdown} + end{shutdown} et ferme son membre gzip
+KillSignal=SIGTERM
+TimeoutStopSec=30
+NoNewPrivileges=yes
+ProtectSystem=strict
+# config.json (relue a chaud) et traces : seul /var/lib/updown5m est inscriptible
+ReadWritePaths=/var/lib/updown5m
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target
