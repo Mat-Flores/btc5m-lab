@@ -164,7 +164,21 @@ for i in "${!ITEMS[@]}"; do
   if [ "$b" -gt "$a" ]; then c=$GRN; m="+$((b-a))"; else c=$YEL; m="stable"; BAD=$((BAD+1)); fi
   printf '  %-24s %12s %12s %s%10s%s\n' "$nm" "$a" "$b" "$c" "$m" "$RST"
 done
+# gzip ecrit par blocs : au demarrage les fichiers restent a 0 ; le critere fiable est status.json (frais, source connectee et non muette)
+STJ=$(rsh "s=\$(stat -c %Y $R_ROOT/status.json 2>/dev/null) && [ \$((\$(date +%s)-s)) -lt 10 ] && cat $R_ROOT/status.json; true")
+DOWN=""
+for i in "${!ITEMS[@]}"; do
+  [ "${SEL[i]}" = 1 ] || continue
+  nm=${ITEMS[i]}
+  e=$(printf '%s' "$STJ" | grep -o "{\"name\":\"$nm\"[^}]*}")
+  age=$(printf '%s' "$e" | sed -nE 's/.*"last_msg_age_ms":([0-9]+).*/\1/p')
+  printf '%s' "$e" | grep -q '"connected":true' && [ "${age:-0}" -lt 60000 ] || DOWN="$DOWN $nm"
+done
+if [ -n "$DOWN" ]; then
+  err "status.json absent, perime, ou source(s) deconnectee(s)/muette(s) depuis 60 s :${DOWN:- toutes}"; rroot "journalctl -u $UNIT -n 15 --no-pager 2>/dev/null; true" | sed 's/^/    /'; exit 1
+fi
+ok "status.json : toutes les sources selectionnees sont connectees et recoivent des messages"
 if [ "$T2" -gt "$T1" ]; then ok "les fichiers du jour grossissent ($(human $((T2-T1))) en ${INTERVAL}s)"
-else err "aucune croissance des fichiers du jour sur ${INTERVAL}s"; rroot "journalctl -u $UNIT -n 15 --no-pager 2>/dev/null; true" | sed 's/^/    /'; exit 1; fi
-[ "$BAD" = 0 ] || warn "$BAD source(s) stable(s) : gzip bufferise, une source peu bavarde peut mettre plus de ${INTERVAL}s a ecrire un bloc ; relancer avec --interval 60 pour confirmer"
+else warn "fichiers du jour encore stables : normal au demarrage (gzip ecrit par blocs)"; fi
+[ "$BAD" = 0 ] || [ "$T2" -le "$T1" ] || warn "$BAD source(s) stable(s) : une source peu bavarde peut mettre plus de ${INTERVAL}s a ecrire un bloc"
 printf '\n%sTermine.%s Rapatrier les donnees : deploy/pull\n' "$BLD$GRN" "$RST"

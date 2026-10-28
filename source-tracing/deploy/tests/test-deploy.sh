@@ -119,7 +119,7 @@ d "start sans source : refuse" bash -c "! bash '$D/start' --yes --sources '' >/d
 bash "$D/stop" --yes --all >/dev/null 2>&1
 printf '#!/bin/sh\nwhile :; do sleep 1; done\n' > "$T/bin/faketracer"   # tracer vivant mais muet
 bash "$D/start" --yes --config-only --sources okx-btc-usdt-swap --interval 2 >/dev/null 2>&1; rc=$?
-d "fichier du jour stable : start echoue (code 1)" test $rc = 1
+d "tracer muet (status.json perime) : start echoue (code 1)" test $rc = 1
 bash "$D/stop" --yes --all >/dev/null 2>&1
 
 echo; echo "=== bilan : $PASS PASS, $FAIL FAIL ==="

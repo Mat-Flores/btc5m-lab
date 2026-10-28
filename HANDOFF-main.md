@@ -11,7 +11,7 @@
 
 ## En cours
 - Rapatriement FINI et vérifié (2026-10-28) : dry-run 10 012 fichiers, live 888 + /tmp + p9/p10 (24 fichiers, sans wallet) dans `updown5m-staging/dublin-live/home`. Les 2 nœuds sont NETTOYÉS (service, /opt, /var/lib/tgap, tgap, node, rust, p9/p10, /tmp) ; l'utilisateur les stoppe dans la console.
-- Déploiement tracing commité : build WSL (`deploy/build-wsl.sh`) + envoi du binaire seul, garde disque 30 Go, tests 32 PASS. Jamais lancé en réel. Conversion des traces en cours (log `updown5m-staging/convert.log`).
+- Déploiement tracing commité : build WSL (`deploy/build-wsl.sh`) + envoi du binaire seul, garde disque 30 Go, tests 32 PASS. DÉPLOYÉ en réel le 2026-10-28 20:33 UTC sur 34.247.53.227 : 8 sources connectées, RSS 7 Mo ; vérif de `start` via status.json (gzip écrit par blocs, la taille ne prouve rien au démarrage). Conversion des traces en cours (log `updown5m-staging/convert.log`).
 
 ## Reste à faire (dans l'ordre)
 1. Finir la recopie + `/tmp` live ; puis l'UTILISATEUR arrête les 2 EC2 (stop, pas terminate) dans la console AWS (pas d'aws CLI ici ; `shutdown` via SSH risqué si le comportement d'arrêt = terminate).
