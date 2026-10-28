@@ -1,8 +1,8 @@
 # Stratégies maker : C4 et backtest des 20 finalistes (22/10/2026)
 
-**Verdict.** Aucune stratégie maker n'est recommandée. Aucun des 20 finalistes n'a un PnL positif en borne prudente hors échantillon avec un IC95 qui exclut 0. Le meilleur candidat mesuré, G2-A, fait +1,71 $ par fenêtre [−0,72 ; +4,13] hors échantillon, porté par le seul 21/10 (`engine/11-maker-polymarket.md:11-15`). L'hypothèse « deux côtés puis annulation du côté perdant en fin de fenêtre » est **réfutée** (`:47-58`).
+**Verdict.** Aucune stratégie maker n'est recommandée. Aucun des 20 finalistes n'a un PnL positif en borne prudente hors échantillon avec un IC95 qui exclut 0. Le meilleur candidat mesuré, G2-A, fait +1,71 $ par fenêtre [−0,72 ; +4,13] hors échantillon, porté par le seul 21/10 (`engine/11-maker-polymarket.md:11-15`). L'hypothèse « deux côtés, puis annulation du côté perdant dans la dernière minute » (`engine/11-maker-polymarket.md:45`) est **réfutée** (`:47-58`).
 
-**Attention : ces chiffres sont historiques.** Ils ont été produits avec des bornes de fill ensuite reconnues biaisées (prudente : −97 % de PnL sur ordres réels ; voir [`simulateur-maker.md`](simulateur-maker.md)), **sans rebates** et avec une retenue de 0,15 s appliquée par défaut aux poses (`engine/maker-bt/WALLETS.md:20-24`, `engine/11-maker-polymarket.md:106,125`). Le verdict « aucune stratégie recommandée » est conservé ; il a été confirmé ensuite avec le moteur corrigé (voir [`exploration-maker-b01-b10.md`](exploration-maker-b01-b10.md) et [`wallets-arcsine-certova.md`](wallets-arcsine-certova.md)). Les chiffres ci-dessous servent de référence de méthode et d'ordres de grandeur, pas de PnL attendu.
+**Attention : ces chiffres sont historiques.** Ils ont été produits avec des bornes de fill ensuite reconnues biaisées (prudente : −97 % de PnL sur ordres réels ; voir [`simulateur-maker.md`](simulateur-maker.md)), **sans rebates** et avec une retenue de 0,15 s appliquée par défaut aux poses (`engine/maker-bt/WALLETS.md:20-24`, `engine/11-maker-polymarket.md:106,125`). Le verdict « Aucune stratégie n'est recommandée » (`engine/11-maker-polymarket.md:11`) est conservé ; il a été confirmé ensuite avec le moteur corrigé (voir [`exploration-maker-b01-b10.md`](exploration-maker-b01-b10.md) et [`wallets-arcsine-certova.md`](wallets-arcsine-certova.md)). Les chiffres ci-dessous servent de référence de méthode et d'ordres de grandeur, pas de PnL attendu.
 
 Conventions. Chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule). **Tout est simulé ; aucun ordre maker n'a jamais été envoyé** (`engine/11-maker-polymarket.md:3,119`). `[à vérifier]` : non établi.
 
@@ -14,7 +14,7 @@ Voir aussi : [`strategies-preneuses.md`](strategies-preneuses.md), [`ordres-et-a
 
 L'ordre non marketable (post-only) échappe à la retenue des preneurs ; il est posé dans le carnet sans frais preneur, avec 20 % de remise maker ; ses annulations ne sont pas retenues. La retenue joue alors **pour** le maker : il peut retirer une cotation devenue fausse avant que les preneurs, retenus, ne la touchent (`engine/10-delai-appariement.md:125-129`). Cette affirmation n'a jamais été mesurée par un ordre maker réel `[à vérifier]`. C'est la candidate C4 de la phase 8, restée sans verdict faute de trades enregistrés (`:128-129`).
 
-Contexte public (phase 0) : seule stratégie pour laquelle une mesure on-chain chiffrée existe : en une semaine de février 2026 (15 min, 2 688 marchés), les makers ont collectivement pris +728 501 $ aux preneurs, avant frais et rebates ; le plus gros perdant de la semaine (−139 971 $) est aussi un maker. Le risque est la sélection adverse (`engine/research_notes/Engine réel Polymarket BTC 5m/axe_C_strategies.md:144,152`). Rebate maker : 20 % des frais preneur, au prorata du `fee_equivalent` du maker dans le même marché, payé chaque jour, « à la discrétion de Polymarket » (`axe_C_strategies.md:147`). Détail : [`contraintes-marche.md`](contraintes-marche.md).
+Contexte public (phase 0) : seule stratégie pour laquelle une mesure on-chain chiffrée existe : en une semaine de février 2026 (15 min, 2 688 marchés), les makers ont collectivement pris +728 501 $ aux preneurs, avant frais et rebates ; le plus gros perdant de la semaine (−139 971 $) est aussi un maker. Le risque est la sélection adverse (`engine/research_notes/Engine réel Polymarket BTC 5m/axe_C_strategies.md:144,152`). Rebate maker : 20 % des frais preneur, au prorata du `fee_equivalent` du maker dans le même marché, payé chaque jour, « at the sole discretion of Polymarket » (formulation de la source, en anglais) (`axe_C_strategies.md:147`). Détail : [`contraintes-marche.md`](contraintes-marche.md).
 
 ## 2. C4 en phase 8 : deux bornes sur des carnets sans trades
 
@@ -79,7 +79,7 @@ Source : `engine/11-maker-polymarket.md:19-26`. Par horizon en partant de 1 000 
 
 **Reclassement par risque mesuré** (seuils sur la semaine en prudente : G1 si DD ≤ 20 % et pire fenêtre ≥ −2 % ; G2 si DD ≤ 30 % et ≥ −10 % ; G3 si DD ≤ 60 % ; G4 au-delà) : G1-A à E restent G1 ; G2-A passe en **G3** (DD 27,8 %, pire fenêtre −12,4 %) ; G2-B reste G2 ; G2-C, D, E passent en G3 (DD 35 %) ; G3-A à E passent en **G4** ; G4 reste G4 (ruine). Le risque réel dépasse le risque prévu dès f = 2 %, à cause du dépassement de mise (§3.5) (`engine/11-maker-polymarket.md:32-43`).
 
-### 3.3 Hypothèse H « deux côtés, puis annulation du côté perdant dans la dernière minute » : réfutée
+### 3.3 Hypothèse H « deux côtés, puis annulation du côté perdant dans la dernière minute » (`engine/11-maker-polymarket.md:45`) : réfutée
 
 Comparaison à décalage égal sur les mêmes fenêtres avec un témoin sans annulation (mise 5 %) (`engine/11-maker-polymarket.md:47-56` ; `engine/maker-bt/results/H/verdict.md`) :
 
@@ -146,4 +146,4 @@ Jeux de données : voir l'annexe `engine/11-maker-polymarket.md:131-135` (trades
 
 - Exploration de 10 lots de stratégies de fin de fenêtre et critères de fiabilité R1-R7 : [`exploration-maker-b01-b10.md`](exploration-maker-b01-b10.md).
 - Correction du simulateur (borne `exact`, retenue 0, rebates) et réplicas de wallets : [`simulateur-maker.md`](simulateur-maker.md), [`wallets-arcsine-certova.md`](wallets-arcsine-certova.md).
-- Verdict du JOURNAL, 2026-10-22 : « aucune recommandée ; annuler le côté perdant en fin de fenêtre n'a aucun effet (perdant déjà exécuté dans 61 à 85 % des fenêtres) » (`engine/JOURNAL.md:23`).
+- Verdict du JOURNAL, 2026-10-22 : les stratégies maker sont « aucune recommandée » et annuler le côté perdant en fin de fenêtre « n'a aucun effet (perdant déjà exécuté dans 61 à 85 % des fenêtres) » (`engine/JOURNAL.md:23`).

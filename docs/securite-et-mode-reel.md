@@ -103,9 +103,13 @@ Trois ordres FAK de 5 pUSD envoyés par l'engine sur le wallet de l'utilisateur,
 
 ### 6.3 Constat du 2026-10-27 : un trader réel est armé sur dublin-live
 
-**Fait constaté le 2026-10-27** : sur `dublin-live`, la session `2026-10-18T23-09-09_live` a un trader réel armé sur la source `okx`. Trois ordres réels de 5 $ y ont été exécutés ; des refus pour risque sont ensuite apparus.
+**Fait constaté — vérification de l'orchestrateur en lecture seule par SSH le 2026-10-27** : sur `dublin-live`, la session `2026-10-18T23-09-09_live` a un trader réel armé sur la source `okx`. Faits relevés :
 
-Sources indiquées par la demande de rédaction : `src/server/app.js:108-138` de la version déployée, et le fichier `records.jsonl` de la session. **Statut de vérification** : ces deux sources se trouvent sur le serveur, auquel le rédacteur n'a pas accès (interdit par la tâche) ; le constat est repris tel quel et n'a pas été revérifié `[à vérifier]`. Éléments de contexte vérifiables dans le dépôt source :
+- le journal `journalctl -u trading-gap` contient `Session started: 2026-10-18T23-09-09_live, ordres réels sur okx` ;
+- ce message n'est imprimé que si un `RealTrader` est armé (`/opt/trading-gap/src/server/app.js:108-138` de la version déployée) ;
+- le fichier `records.jsonl` de la session contient 3 `order`, 3 `fill`, 3 `close` et 528 `skip` avec `"account":"real"`.
+
+Lecture : 3 ordres réels de 5 $ ont été passés puis suivis de refus pour risque. **`[à vérifier]`** : l'exécution réelle n'est pas confirmée on-chain (aucun hash de transaction dans ces enregistrements) ; le lien avec les 3 ordres tués du 2026-10-22 n'est pas établi. Le rédacteur de ce document n'a pas lui-même accès au serveur : ces faits sont repris du relevé de l'orchestrateur, non revérifiés par lui. Éléments de contexte vérifiables dans le dépôt source :
 
 - Le `src/server/app.js` actuel du dépôt (HEAD) ne contient plus ce comportement : aux lignes 101-125, `startRun` lance le binaire de l'engine Rust (`src/server/app.js:101-125`, constaté par lecture). La version déployée est donc plus ancienne que le HEAD `[à vérifier : quelle version exacte]`.
 - Dans la version antérieure à la purge (commit `7138fbc^`), `src/server/app.js:105-140` contient `startSession`, qui crée un `RealTrader`, l'arme (`t.arm({ sources, wallet, passphrase, limits })`) et écrit un événement `{k:'real', type:'armed'}` dans la session. Cette lecture (`git show 7138fbc^:src/server/app.js`) est cohérente avec un « trader réel armé » mais ne prouve pas à elle seule la version déployée.

@@ -74,7 +74,7 @@ Une citation `fichier:N` ou `fichier:N-M` désigne les lignes du fichier. Les li
 | `POST /order` : `deferExec` vaut `false` par défaut, son sens n'est pas documenté. | `RN/axe_B_ordres.md:19` et `:70` | **[à vérifier]** |
 | Comportement détaillé de **FOK** : non décrit dans le corpus au-delà de son nom et de l'absence de hash de transaction. | `RN/axe_B_ordres.md:27` | **[à vérifier]** |
 | Post-only qui croiserait : **rejeté, pas retardé**. Aucun compte n'est dispensé du délai. | `RN/delais_sources.md:48` et `:56-58` | Doc officielle |
-| Qu'un post-only « passe sans attente » : déduction de la définition de « marketable », jamais confirmé explicitement. | `RN/delais_sources.md:61` ; `E/00-recherche.md:127` | **[à vérifier]** |
+| Qu'un post-only « passe sans aucune attente » : déduction de la définition de « marketable », jamais confirmé explicitement. | `RN/delais_sources.md:61` ; `E/00-recherche.md:127` | **[à vérifier]** |
 | Indice mesuré : des ordres d'arcsine posés 11 à 140 ms avant un trade sont remplis (délai pose → premier fill : 140 ms en médiane). | `MB/WALLETS.md:43` | Mesuré sur un tiers. **Aucun ordre maker n'a jamais été envoyé par nous** (`E/11-maker-polymarket.md:119`). |
 | Annulation permise « except while a marketable order is in a pending delay window », c'est-à-dire que l'ordre preneur retenu ne s'annule pas. | `RN/delais_sources.md:49` ; `E/10-delai-appariement.md:62-63` | Doc officielle |
 | Annulation d'un maker face à un preneur déjà retenu : le simulateur est prudent (« une annulation n'évite le fill que si elle a pris effet avant la soumission du preneur »). La doc dit que l'ordre retenu est revalidé à la fin. Nos données ne permettent pas de trancher. | `E/11-maker-polymarket.md:104` et `:116` ; `MB/WALLETS.md:43` | **[à vérifier]** |
@@ -86,7 +86,7 @@ Une citation `fichier:N` ou `fichier:N-M` désigne les lignes du fichier. Les li
 | Heartbeat : sans battement valide sous 10 s, tous les ordres ouverts (GTC/GTD) sont annulés ; intervalle conseillé 5 s. | `RN/axe_B_ordres.md:195` ; `E/00-recherche.md:137` | Doc. Chemin `/v1/heartbeats` ou `/heartbeats` **[à vérifier]** (`E/00-recherche.md:200`). |
 | Lots `POST /orders` de 1 à 15, sans clé d'idempotence ; `DELETE /orders` jusqu'à 1 000 ids (changelog du 2026-06-15) ou 3 000 (référence `cancel-multiple`). | `E/00-recherche.md:135` et `:200` ; `RN/delais_sources.md:118` | Plafond d'annulation **[à vérifier]** |
 | Redémarrage du moteur : HTTP 425, puis post-only 2 min (503), puis cancel-only (503). | `RN/axe_B_ordres.md:45-51` | Doc |
-| Limites de débit : file Cloudflare par IP (`POST /order` 5 000 / 10 s) ; seau par signataire, Standard 40 ordres/s (rafale 60) jusqu'à Elite 600/s ; 429 + `Retry-After`. | `RN/axe_B_ordres.md:174-183` ; `E/00-recherche.md:300-301` | Doc. Application réelle du seau « à annoncer ». |
+| Limites de débit : file Cloudflare par IP (`POST /order` 5 000 / 10 s) ; seau par signataire, Standard 40 ordres/s (rafale 60) jusqu'à Elite 600/s ; 429 + `Retry-After`. | `RN/axe_B_ordres.md:174-183` ; `E/00-recherche.md:300-301` | Doc. Application réelle du seau : « will announce ». |
 
 Détail du cycle de vie, des signatures et des garde-fous : [ordres-et-appariement.md](ordres-et-appariement.md).
 
@@ -97,9 +97,9 @@ Détail du cycle de vie, des signatures et des garde-fous : [ordres-et-apparieme
 **Doc officielle.**
 - Retenue des ordres preneurs crypto : **150 ms depuis le 2026-09-04 14:00 UTC**. Avant : 50 ms du 2026-08-17 11:00 au 2026-09-04, et 250 ms avant. L'ordre est non annulable pendant la retenue, ses contrôles sont refaits à la fin, il peut être rejeté. Source : `RN/delais_sources.md:13-16`.
 - Les pages « Order lifecycle » et `clob-markets` affichent encore 250 ms. La valeur de 150 ms vient de l'entrée datée la plus récente du changelog. Source : `RN/axe_B_ordres.md:17` ; `E/00-recherche.md:190`.
-- Historique 500 ms (retiré en février 2026), 250 ms « à partir du 2026-02-25 » et blocage des annulations « depuis le 2026-06-05 » : rumeurs ou sources secondaires, aucune entrée du changelog officiel. Source : `RN/delais_sources.md:20-25` et `:36`. Statut : `[non vérifié]`.
+- Historique 500 ms (retiré en février 2026), 250 ms mis en place le 2026-02-25 (miroir) et blocage des annulations « depuis le 2026-06-05 » : rumeurs ou sources secondaires, aucune entrée du changelog officiel. Source : `RN/delais_sources.md:20-25` et `:36`. Statut : `[non vérifié]`.
 - Champ de détection : `itode: true` dans `GET /clob-markets/{conditionId}`, **mesuré** ; aucun `secondsDelay` dans cette réponse, et la durée n'est pas dans le marché. Source : `E/01-audit.md:235`. Cela tranche la contradiction restée ouverte en `E/00-recherche.md:189`.
-- Pendant la retenue, « l'API attend et renvoie le résultat final » ; `delayed` n'est jamais apparu. Source : `E/00-recherche.md:191` ; `E/10-delai-appariement.md:59-60`.
+- Pendant la retenue, « The API waits for this hold and returns the final order result » ; `delayed` n'est jamais apparu. Source : `E/00-recherche.md:191` ; `E/10-delai-appariement.md:59-60`.
 - Les 150 ms ne sont pas un cadencement par lots : 16 014 trades d'une heure sont répartis uniformément dans la seconde. Source : `E/10-delai-appariement.md:50-53`.
 - Aucune exemption de compte ou de programme documentée. Source : `RN/delais_sources.md:44` et `:58`.
 
@@ -120,10 +120,10 @@ Détail du cycle de vie, des signatures et des garde-fous : [ordres-et-apparieme
 | Effet sur la stratégie preneuse (18,7 h rejouées) | 150 ms : +66 $ par position de 100 $ [+18 ; +114] ; 450 ms : +41 [+1 ; +80] ; 600 ms : +34 [−8 ; +76] ; 900 ms : +34 [−17 ; +85] ; 1 500 ms : +2 [−78 ; +83] ; 3 500 ms : −20 [−104 ; +65]. | `E/10-delai-appariement.md:90-97` |
 
 **Réserves et contradictions.**
-- **[à vérifier]** La distribution de retenue utilisée par le simulateur maker pour les sorties preneuses (p10 0,19 / p50 0,36 / p90 1,5 / max 3,5 s) est dérivée du tableau « premier trade après un saut » et des 3 ordres (`E/11-maker-polymarket.md:105`, `MB/sim.mjs:40`, quantiles `[[0,0.15],[0.1,0.19],[0.5,0.36],[0.9,1.5],[1,3.5]]`). Ce n'est pas une mesure directe de la retenue ; n = 3 ordres.
+- **[à vérifier]** La distribution de retenue utilisée par le simulateur maker pour les sorties preneuses (p10 0,19 / p50 0,36 / p90 1,5 / max 3,5 s) est dérivée du tableau du premier trade après un saut d'OKX (`E/10-delai-appariement.md:70-73`) et des 3 ordres (`E/11-maker-polymarket.md:105`, `MB/sim.mjs:40`, quantiles `[[0,0.15],[0.1,0.19],[0.5,0.36],[0.9,1.5],[1,3.5]]`). Ce n'est pas une mesure directe de la retenue ; n = 3 ordres.
 - La retenue observée (0,19 à 3,5 s) est très supérieure aux 150 ms annoncés. Cause non identifiée : file de vidange après un mouvement, ordre de passage, ou autre (`E/10-delai-appariement.md:6-11`, `:65-83`).
 - Le « traitement du moteur d'appariement » est supposé nul : `[non vérifié]` (`E/08-strategies.md:83`).
-- **[à vérifier]** Annulations et poses des makers. `E/10-delai-appariement.md:125-127` écrit que le post-only et ses annulations « ne sont pas retenus », alors que `MB/WALLETS.md:43` établit seulement que les *poses* ne sont pas retenues (sur arcsine) et que les annulations sont indécidables sur nos données.
+- **[à vérifier]** Annulations et poses des makers. `E/10-delai-appariement.md:125-127` écrit que les annulations du post-only ne sont pas retenues non plus, alors que `MB/WALLETS.md:43` établit seulement que les *poses* ne sont pas retenues (sur arcsine) et que les annulations sont indécidables sur nos données.
 - **[à vérifier]** `E/10-delai-appariement.md:62-63` cite l'annonce du 2026-06-05 (« l'ordre retenu ne peut plus être annulé ») comme fait ; `RN/delais_sources.md:24` la classe en rumeur (extrait de moteur de recherche). La doc officielle « Order lifecycle » dit la même chose (`RN/delais_sources.md:16` et `:49`).
 - Sorties preneuses des stratégies maker : 85 à 91 % des stops ne vendent pas tout (`E/11-maker-polymarket.md:72`).
 
@@ -176,7 +176,7 @@ Détail des flux : [sources-de-prix-et-flux.md](sources-de-prix-et-flux.md).
 | **Chainlink (RTDS)** | ~0,97 msg/s ; âge p50 1 411 / p99 2 196 / max 2 814 ms à Dublin ; 1 362 / 2 159 ms sur 18,7 h. Jamais un signal rapide. Historique envoyé à l'abonnement. Seuil de silence 10 s. | `E/01-audit.md:212` ; `E/09-endurance.md:32` ; `E/04-flux.md:32` et `:41` | Mesuré |
 | | Coupure planifiée à xx:52:00 toutes les 2 h (7 coupures sur 11) ; 68 trous > 3 s, max 8,8 s en 18,7 h. | `E/09-endurance.md:57` et `:65` | Mesuré |
 | | Dans les enregistrements, silence > 5 s dans 605 fenêtres sur 2 090 (> 10 s dans 3) ; notre TWAP figé jusqu'à 60 s dans 45 fenêtres. | `E/11-maker-polymarket.md:110` ; `E/08-strategies.md:217` | Mesuré |
-| | RTDS « legacy » depuis le 2026-09-15, retrait « un mois après la 0.11.0 », sans date. PolyBolt : identifiants CLOB L2 obligatoires, `price.crypto` ≈ 1 mise à jour/s (Chainlink par défaut depuis le 2026-10-02), `price.crypto.twap` 60 s. Pas d'adaptateur PolyBolt. | `RN/axe_A_sources.md:105-109` ; `E/04-flux.md:102` | Doc. Cadence du TWAP PolyBolt **[à mesurer]** (`RN/axe_A_sources.md:152`). |
+| | RTDS « legacy » depuis le 2026-09-15, retrait « one month after the 0.11.0 release », sans date. PolyBolt : identifiants CLOB L2 obligatoires, `price.crypto` ≈ 1 mise à jour/s (Chainlink par défaut depuis le 2026-10-02), `price.crypto.twap` 60 s. Pas d'adaptateur PolyBolt. | `RN/axe_A_sources.md:105-109` ; `E/04-flux.md:102` | Doc. Cadence du TWAP PolyBolt **[à mesurer]** (`RN/axe_A_sources.md:152`). |
 | | Chainlink Data Streams direct : ≥ 150 $/mois/flux, passerelle aux États-Unis. Écarté. | `E/00-recherche.md:112` ; `RN/axe_A_sources.md:116-118` | Décision |
 | **OKX `bbo-tbt`** | Tokyo (annonce du 2026-05-14, migration fin juillet 2026). Fournisseur et région non publiés. RTT Dublin → OKX 255,6 / 278,9 ms (chaud). | `RN/axe_A_sources.md:164` ; `E/01-audit.md:187` | Établi. La page Glassnode « AWS ap-east-1 » est probablement périmée (`RN/axe_A_sources.md:166`). |
 | | Âge à la réception p50 118 à 127 ms, écart p99 − p50 ≈ 1,8 à 4 ms ; sur 18,7 h : p50 126,3 / p99 139,9 ms. | `E/01-audit.md:210` ; `E/05-okx.md:45` ; `E/09-endurance.md:32` | Mesuré |

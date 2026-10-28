@@ -12,7 +12,7 @@
 
 ## 1. Vue d'ensemble : âges mesurés depuis Dublin
 
-Mesures du nœud `dublin-live`, chrony ≈ 1 µs, écart NTP 0,7 ms (`E/01-audit.md:165`, `:201-202`). L'âge est « horodatage source → réception ».
+Mesures du nœud `dublin-live`, chrony ≈ 1 µs, écart NTP 0,7 ms (`E/01-audit.md:165`, `:201-202`). L'âge est le délai entre l'horodatage source et la réception.
 
 | Source | Messages/s | Âge p50 / p99 / max (ms) | Écart p99 − p50 | Intervalle p50 / p99 / max (ms) | Source |
 |---|---|---|---|---|---|
@@ -24,9 +24,9 @@ Mesures du nœud `dublin-live`, chrony ≈ 1 µs, écart NTP 0,7 ms (`E/01-audit
 | OKX `bbo-tbt` BTC-USDT (spot) | 13,8 | 117,9 / 119,7 / 174 | 1,8 | 30 / 560 / 2 400 | `E/01-audit.md:211` |
 | RTDS Chainlink | 0,97 | 1 411 / 2 196 / 2 814 | 785 | 959 / 2 018 / 8 696 | `E/01-audit.md:212` |
 
-Lectures : OKX arrive avec 118 ms de retard très régulier (trajet Tokyo → Dublin) ; Coinbase arrive à 53 ms en médiane, soit ~65 ms plus tôt qu'OKX, avec la réserve que le `ts` d'OKX est l'heure du moteur et celui de Coinbase l'heure du trade (`E/01-audit.md:216-219`). Polymarket : 11,5 ms en médiane mais 276 ms au p99 (`E/01-audit.md:220-221`). Chainlink : « jamais un signal rapide » (`E/01-audit.md:224`).
+Lectures : OKX arrive avec 118 ms de retard très régulier (trajet Tokyo → Dublin) ; Coinbase arrive à 53 ms en médiane, soit ~65 ms plus tôt qu'OKX, avec la réserve que le `ts` d'OKX est l'heure du moteur et celui de Coinbase l'heure du trade (`E/01-audit.md:216-219`). Polymarket : 11,5 ms en médiane mais 276 ms au p99 (`E/01-audit.md:220-221`). Chainlink : « le flux de règlement n'est donc jamais un signal rapide » (`E/01-audit.md:144-145`).
 
-RTT applicatifs (`rtt.mjs`, chaud p50 / p99) : CLOB 24,4 / 29,5 ms ; OKX 255,6 / 278,9 ms ; Coinbase 125,0 / 129,5 ms ; Binance 207,2 / 212,3 ms. Source : `E/01-audit.md:183-189`. Les RTT de Kalshi et Limitless mesurés (5-6 ms) viennent d'un cache CDN et « ne mesurent pas le moteur » (`E/01-audit.md:190-191`).
+RTT applicatifs (`rtt.mjs`, chaud p50 / p99) : CLOB 24,4 / 29,5 ms ; OKX 255,6 / 278,9 ms ; Coinbase 125,0 / 129,5 ms ; Binance 207,2 / 212,3 ms. Source : `E/01-audit.md:183-189`. Les RTT de Kalshi et Limitless mesurés (5-6 ms) viennent d'un cache CDN et « ne mesure pas le moteur » (`E/01-audit.md:190-191`).
 
 ## 2. Polymarket, canal `market` (carnet)
 
@@ -142,7 +142,7 @@ Synthèse, avec les deux séries de sources ; l'analyse complète est en [contra
 
 - Les pages de latence tierces (Glassnode `llms.txt`) contiennent des consignes adressées aux agents d'IA (liste d'attente, lien de parrainage) : ignorées et signalées, la page n'a servi que de donnée. Source : `E/00-recherche.md:212`.
 - Les chiffres de latence de blogs d'hébergeurs de VPS (Dublin « 0-1 ms ») sont de simples affirmations ; RTT mesuré Dublin → CLOB : 24 ms applicatif à chaud. Source : `RN/axe_B_ordres.md:234-237` ; `E/01-audit.md:193-195`.
-- Le RTT Dublin ↔ Londres de ~12 ms est une hypothèse de travail (agrégateur public, méthode absente) ; « 0-2 ms » est tranché contre (460 km, ≥ 4,6 ms aller-retour en ligne droite). Source : `E/00-recherche.md:188`.
+- Le RTT Dublin ↔ Londres de ~12 ms est une hypothèse de travail (agrégateur public, méthode absente) ; « 1-2 ms » est tranché contre (460 km, ≥ 4,6 ms aller-retour en ligne droite). Source : `E/00-recherche.md:188`.
 
 ## 9. Points [à vérifier]
 

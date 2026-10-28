@@ -47,7 +47,7 @@
 | Un post-only qui croiserait est **rejeté, pas retardé**. L'engine doit traiter ce rejet. | `RN/delais_sources.md:48`, `:57` | Doc officielle |
 | Annulation permise « except while a marketable order is in a pending delay window ». | `RN/delais_sources.md:49` | Doc officielle |
 | Aucun compte ni programme (market maker, rebates, builders, niveaux de volume) n'est dispensé du délai. Rien n'est dit sur un accord privé pour les market makers (la page renvoie au support). | `RN/delais_sources.md:44`, `:50`, `:58`, `:62` | Doc / absence constatée |
-| Qu'un post-only « passe sans attente » : déduction de la définition de « marketable ». | `RN/delais_sources.md:61` ; `E/00-recherche.md:127` | **[à vérifier]** |
+| Qu'un post-only « passe sans aucune attente » : déduction de la définition de « marketable ». | `RN/delais_sources.md:61` ; `E/00-recherche.md:127` | **[à vérifier]** |
 | Des ordres d'arcsine posés 11 à 140 ms avant un trade sont remplis ; les annulations sont indécidables sur nos données. | `MB/WALLETS.md:43` | Mesuré sur un tiers |
 | **Aucun ordre maker n'a jamais été envoyé par nous.** | `E/11-maker-polymarket.md:119` | Établi |
 
@@ -57,7 +57,7 @@
 
 ## 3. SDK officiel et appels réseau cachés
 
-- SDK actuels : `@polymarket/client` (TS) et `polymarket-client` (Python), version 0.13. Le Rust unifié est « en développement » ; les anciens clients Rust ne fonctionnent plus (`rs-clob-client` archivé le 2026-05-11). Source : `RN/axe_B_ordres.md:110-112`.
+- SDK actuels : `@polymarket/client` (TS) et `polymarket-client` (Python), version 0.13. Le Rust unifié est « in development » (« A unified Rust SDK is in development. ») ; les anciens clients Rust ne fonctionnent plus (`rs-clob-client` archivé le 2026-05-11). Source : `RN/axe_B_ordres.md:110-112`.
 - Dans le SDK TS 0.13, `createMarketOrder` **avec `maxPrice`** fait **deux GET en série** au premier ordre sur un token (`/markets-by-token/{assetId}` puis `/clob-markets/{conditionId}`), puis cache (10 min pour `{feeInfo, negRisk, tickSize}`). **Sans `maxPrice`/`minPrice`**, il fait un `GET /book` à chaque ordre. Source : `RN/axe_B_ordres.md:119-123` ; `E/00-recherche.md:128-129`.
 - Mesuré à Dublin : premier ordre d'un token 82 ms (34 + 23 ms de GET), `createMarketOrder` à chaud p50 1,16 ms / p99 3,29 ms ; sans `maxPrice` 37 et 28 ms (`GET /book`). Au portable : 1 044 ms et p50 0,53 ms. Source : `E/01-audit.md:171-176`, `:245`.
 - Chaque fenêtre est un nouveau marché : le **premier ordre d'une fenêtre** paie les deux GET, sauf cache préchauffé. L'engine ne passe par aucun appel caché (`Clob::warm`, métadonnées lues par le fil froid). Source : `RN/axe_B_ordres.md:132` ; `E/06-execution.md:90`.
@@ -98,7 +98,7 @@
 - **150 ms depuis le 2026-09-04 14:00 UTC** ; 50 ms du 2026-08-17 11:00 au 2026-09-04 ; 250 ms avant. Source : `RN/delais_sources.md:13-14`, `:30`.
 - Les pages « Order lifecycle » et `clob-markets` affichent encore 250 ms : la valeur de 150 ms vient de l'entrée datée la plus récente du changelog. Source : `RN/axe_B_ordres.md:17` ; `E/00-recherche.md:190`.
 - Aucune entrée du changelog officiel ne crée le délai de 250 ms, ni le 500 ms, ni sa suppression. Source : `RN/delais_sources.md:15`.
-- Historique non officiel (rumeurs, extraits de moteur de recherche) : 500 ms retiré en février 2026, 250 ms « à partir du 2026-02-25 », blocage des annulations « depuis le 2026-06-05 ». Source : `RN/delais_sources.md:20-25`. Statut `[non vérifié]`.
+- Historique non officiel (rumeurs, extraits de moteur de recherche) : 500 ms retiré en février 2026, 250 ms mis en place le 2026-02-25 (miroir), blocage des annulations « depuis le 2026-06-05 ». Source : `RN/delais_sources.md:20-25`. Statut `[non vérifié]`.
 - Sports : 3 s sur les ordres marketables, 1 s en test NBA/MLB (hors périmètre). Source : `RN/delais_sources.md:26`.
 
 ### 6.2 Comportement documenté
@@ -162,7 +162,7 @@ En réel, 0 ordre sur 3 a été rempli, ce qui correspond à un délai d'au moin
 | Sujet | Fait | Source |
 |---|---|---|
 | Couche Cloudflare par IP | Mise en file « delayed/queued », pas de rejet : global CLOB 9 000 / 10 s ; `POST /order` 5 000 / 10 s et 120 000 / 10 min ; `POST /orders` 2 000 / 10 s et 21 000 / 10 min ; `/book` 1 500 / 10 s ; tick size 200 / 10 s ; clés API 100 / 10 s. Durée réelle de la file : non publiée. | `RN/axe_B_ordres.md:174-182`, `:204` ; `RN/delais_sources.md:116`, `:132` |
-| Couche par signataire | Un jeton par ordre (y compris dans un lot) ; Standard 40 ordres/s (rafale 60), 80 annulations/s (rafale 120) ; jusqu'à Elite 600/s selon le volume maker sur 30 jours ; 429 + `Retry-After` ; avertissement depuis le 2026-07-24, application réelle « à annoncer ». Un lot est refusé en entier si le seau ne le couvre pas. | `RN/axe_B_ordres.md:183` ; `RN/delais_sources.md:117` ; `E/00-recherche.md:301` |
+| Couche par signataire | Un jeton par ordre (y compris dans un lot) ; Standard 40 ordres/s (rafale 60), 80 annulations/s (rafale 120) ; jusqu'à Elite 600/s selon le volume maker sur 30 jours ; 429 + `Retry-After` ; avertissement depuis le 2026-07-24, application réelle « will announce ». Un lot est refusé en entier si le seau ne le couvre pas. | `RN/axe_B_ordres.md:183` ; `RN/delais_sources.md:117` ; `E/00-recherche.md:301` |
 | Contradiction des pages | « Rate Limits » décrit de la mise en file, « Trading Rate Limits » des 429 : les deux couches coexistent sans doute. | `RN/axe_B_ordres.md:192` ; `E/00-recherche.md:198` |
 | Pertinence | Quelques ordres par fenêtre : très loin des seuils ; gérer 425 / 429 / 503 avec `Retry-After`, ne jamais boucler en REST. | `RN/axe_B_ordres.md:199` ; `E/00-recherche.md:136` |
 | Lots | `POST /orders` de 1 à 15 ordres, sans clé d'idempotence (un lot ne se réessaie pas) ; utile seulement pour coter deux côtés. `DELETE /orders` jusqu'à 1 000 ids (changelog 2026-06-15) ou 3 000 (référence). | `E/00-recherche.md:135`, `:200` ; `RN/delais_sources.md:118` |

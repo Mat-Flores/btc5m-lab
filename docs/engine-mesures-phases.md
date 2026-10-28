@@ -18,7 +18,7 @@ Convention : chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule),
 | 7 Comptabilité, valeur en direct, défenses | Terminée le 2026-10-20, aucun ordre réel | `engine/JOURNAL.md:14` |
 | 8 Stratégies | Livrable présenté le 2026-10-20, en attente de la décision de l'utilisateur | `engine/JOURNAL.md:15` |
 | 9 Endurance sans argent | Run papier de 18,7 h analysé ; latence interne de l'engine « en attente » du rapport de fin | `engine/JOURNAL.md:16` ; `engine/09-endurance.md:31` |
-| 10 Premier ordre réel | Mode réel assemblé et revu le 2026-10-21 ; le 2026-10-22, 3 ordres FAK réels, tous tués (§10) ; la case reste ouverte dans le journal (« en attente du fichier du wallet et du go »), l'état n'a pas été mis à jour après le 2026-10-22 | `engine/JOURNAL.md:17, :26` |
+| 10 Premier ordre réel | Mode réel assemblé et revu le 2026-10-21 ; le 2026-10-22, 3 ordres FAK réels, tous tués (§10) ; la case reste ouverte dans le journal (en attente du fichier du wallet et du go de l'utilisateur), l'état n'a pas été mis à jour après le 2026-10-22 | `engine/JOURNAL.md:17, :26` |
 
 Critères d'acceptation globaux de la mission (tous encore des cases non cochées dans `TODO.md`) : quatre objectifs aux cibles ; brancher/retirer une source sans toucher au cœur ; décisions de la référence identiques à l'ancien moteur ; 24 h d'endurance sans incident inexpliqué ; revues adversariale et de sécurité faites ; réconciliation exacte sur l'essai réel ; délais des sources documentés et mesurés ; valeur du compte et stop loss suivis en direct (`TODO.md:635-649`).
 
@@ -158,7 +158,7 @@ Coupures attendues : Polymarket 212 à 215 par connexion (≈ 1 toutes les 5 min
 
 Stratégie en papier (simulé) : 45 décisions, 34 remplies, 11 manquées ; 28 gagnantes / 6 perdantes ; PnL +2 402,42 $ pour 2 519,85 $ engagés et 86,59 $ de frais ; creux maximal −104,9 $ ; +70,2 $ par position de 100 $ [IC95 +19,8 ; +120,7], médiane +72,9, n = 34 ; sans la plus grosse position (+836 $, un tiers du résultat) +48,5 $ [+20,6 ; +76,4] (`engine/09-endurance.md:71-77, :83-87`). La file d'attente n'est pas modélisée ; un preneur plus rapide aurait pu prendre ces niveaux (`engine/09-endurance.md:89-91`).
 
-Verdict : endurance réussie sur 18,7 h, aucun crash ni perte de fait, mémoire stable ; critère « 24 h sans incident inexpliqué » tenu sur 18,7 h par choix de l'utilisateur (`engine/09-endurance.md:95-102`).
+Verdict : endurance réussie sur 18,7 h, aucun crash ni perte de fait, mémoire stable ; critère « 24 h d'endurance sans incident inexpliqué » tenu sur 18,7 h par choix de l'utilisateur (`engine/09-endurance.md:95-102`).
 
 ## 10. Phase 10 : premiers ordres réels (2026-10-22)
 

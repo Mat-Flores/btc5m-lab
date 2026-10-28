@@ -98,7 +98,7 @@ Par jour en borne exacte, réel / prédit : 15/10 356 / −93 ; 16/10 535 / 1 26
 1. **Les heures data-api sont des heures de bloc**, en retard de **2,5 s** en médiane (1,7-3,1 s) sur le match visible dans le carnet (mesure : fills on-chain d'arcsine comparés à la baisse exacte qu'ils produisent dans nos deltas).
 2. **Les trades apparaissent dans les deltas `price_change`**, pas dans les snapshots ; nos sessions ne contiennent aucun trade. `fills.mjs` les retrouve en associant chaque ordre taker (fills complets `takerOnly=false`, lignes maker au prix exact du niveau) à la baisse exacte de son volume : **97 % des trades et 96 % du volume**, contre 8,6 % de coïncidences avec un décalage témoin de +10 s.
 3. **Matching FIFO** (ordre des `OrderFilled` on-chain). Quand arcsine est rempli, il est le seul maker du niveau dans 42 % des cas ; s'il y en a plusieurs, il est le dernier servi dans 58 % des cas.
-4. **Annulations et file** : une annulation réduit la file devant nous **au prorata**. Sur 66 273 ordres réels, le volume prédit vaut 1,04 fois le réel au prorata, 0,94 si les annulations sont toutes derrière nous, 1,09 si elles sont toutes devant. **La réalité est entre le prorata et « toutes derrière ».**
+4. **Annulations et file** : une annulation réduit la file devant nous **au prorata**. Sur 66 273 ordres réels, le volume prédit vaut 1,04 fois le réel au prorata, 0,94 si les annulations sont toutes derrière nous, 1,09 si elles sont toutes devant. **La réalité est entre le prorata et « toutes derrière nous » (`WALLETS.md:40`).**
 5. Le calldata `matchOrders` (exchange V2 `0xe11118…`) contient les ordres signés : taille d'origine, prix, champ `timestamp` de création en ms (0 chez arcsine).
 6. **Rebates maker** : 0,2 × 0,07 × p(1−p) × parts par fill, versés le lendemain à 00:45 UTC. Vérifié au cent près sur les versements quotidiens d'arcsine (254,60 $ versés pour 254,44 $ calculés ; 477,78 $ pour 477,72 $) : **deux jours, un seul wallet** `[à vérifier]` ailleurs.
 7. **La retenue de 0,15 s ne vaut pas pour la pose** : un ordre posé 11 à 140 ms avant un trade est rempli en réalité (délai pose → premier fill d'arcsine : 140 ms en médiane). Pour les **annulations**, les données ne permettent pas de trancher `[à vérifier]`.
@@ -122,7 +122,7 @@ Détail des règles officielles : [`contraintes-marche.md`](contraintes-marche.m
 
 ## 6. Re-mesure du 2026-10-27 (référence de non-régression figée)
 
-Commande : `node --max-old-space-size=8192 engine/maker-bt/validate.mjs --delay 0 --sim exact`, durée 21 min 42 s (rapport de conception de la migration, phase 1, non versionné). Sortie de référence :
+Commande : `node --max-old-space-size=8192 engine/maker-bt/validate.mjs --delay 0 --sim exact`, durée 21 min 42 s ([conception-engine-migration.md:24-25](conception-engine-migration.md) ; bloc de sortie aussi dans [contrats-migration.md:144-156](contrats-migration.md)). Sortie de référence :
 
 ```
 simWindow on 59695 twins after the open with a known end (real 1089572 sh, PnL 17331 $):
@@ -162,7 +162,7 @@ Le σ optimal dépend donc de la source de prix. Les seuils `sideProb` des ancie
 | `ONE_WAY` | 12,2 ms | moitié du RTT p50 Dublin → CLOB ; symétrie `[non vérifié]` | 36 |
 | `MIN_SIZE` | 5 parts | `orderMinSize` (`src/feeds/live.js`) ; `mos: 5` lu une fois | 37 |
 | `SILENCE_MS` | 3 000 | seuil de silence Polymarket | 38 |
-| `HOLD_Q` | [[0, 0,15], [0,1, 0,19], [0,5, 0,36], [0,9, 1,5], [1, 3,5]] s | `engine/10-delai-appariement.md` ; **pas une mesure directe** (n = 3 ordres + « premier trade après un saut ») `[à vérifier]` | 39-40 |
+| `HOLD_Q` | [[0, 0,15], [0,1, 0,19], [0,5, 0,36], [0,9, 1,5], [1, 3,5]] s | `engine/10-delai-appariement.md` ; **pas une mesure directe** (n = 3 ordres + tableau du premier trade après un saut d'OKX) `[à vérifier]` | 39-40 |
 | retenue par défaut `delay` | 0,15 s (recommandé : 0 avec `exact`) | contrainte de l'utilisateur | 166 |
 | `exitSlip` | 0,05 | limite FAK = probabilité − exitSlip | 56 |
 | `quoteEnd`, `entryFrom` | 10 s, 10 s | stratégie | 59-60 |
@@ -182,4 +182,4 @@ Voir [`architecture-backtest.md`](architecture-backtest.md) §6.4 pour la liste 
 
 ## 11. Points à vérifier
 
-Symétrie de l'aller simple ; retenue des annulations maker (indécidable sur nos données) ; annulations prorata contre « toutes derrière » ; file mesurée à la décision contre à l'arrivée ; impact de nos ordres sur le carnet ; ordres de 5 parts mal retrouvés ; durabilité et éligibilité des rebates ; délai de réclamation ; coupure du carnet en fin de fenêtre ; distribution de retenue des sorties preneuses ; latences de réception de Binance et Coinbase ; σ par source.
+Symétrie de l'aller simple ; retenue des annulations maker (indécidable sur nos données) ; annulations prorata contre « toutes derrière nous » (`WALLETS.md:40`) ; file mesurée à la décision contre à l'arrivée ; impact de nos ordres sur le carnet ; ordres de 5 parts mal retrouvés ; durabilité et éligibilité des rebates ; délai de réclamation ; coupure du carnet en fin de fenêtre ; distribution de retenue des sorties preneuses ; latences de réception de Binance et Coinbase ; σ par source.

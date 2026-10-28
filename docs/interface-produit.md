@@ -57,7 +57,7 @@ L'identité de départ garde l'ADN : bleu « modèle » `#2a78d6`, orange Polyma
 | --- | --- | --- |
 | Stack | Svelte 5 + Vite avec build ; icônes `@lucide/svelte` ; serveur Node pur sans framework ; l'interface est construite sur le poste puis envoyée en fichiers statiques | `SPEC.md:369-373` ; `deploy/push-node.sh:13-14` |
 | Contrainte de la nouvelle UI | Serveur `node:http` seul, aucune dépendance, pas de build (contrat de la migration, `ui/README.md`) | contrats de migration (dépôt cible) |
-| Un onglet = une tâche | Live, Stratégies, Backtest, Nœud et latence ; Vue d'ensemble et Analyse supprimés ; plus de bouton « Paramètres » global : les seuils affichés sont les paramètres | `PRODUCT.md:39-42` ; `.impeccable/surfaces/ui-src-app-svelte.md:14-15, :23-25` |
+| Un onglet = une tâche | Live, Stratégies, Backtest, Nœud et latence ; Vue d'ensemble et Analyse supprimés ; plus de bouton « Paramètres » global : les seuils affichés sont les paramètres | `.impeccable/surfaces/ui-src-app-svelte.md:14-15, :23-25` ; `PRODUCT.md:39-42` |
 | Un axe de temps unique pour la fenêtre de 5 min | Graphique, signaux, ordres et règlement s'alignent sur le même axe ; refus de la pile de panneaux où santé, décision et résultat sont au même niveau | `.impeccable/surfaces/ui-src-app-svelte.md:45-47` |
 | Pouls du nœud | 4 tuiles vitales avec courbe récente tenue dans le navigateur, une carte par flux ; détail du serveur servi par un point d'API ponctuel, jamais par le flux temps réel | `.impeccable/surfaces/ui-src-app-svelte.md:39-42` |
 | Raccourcis | `l`, `b`, `n`, `T` (thème), `?` et `Ctrl K` (palette de commandes), `Échap` | `DESIGN.md:488-489` ; `SPEC.md:399-402` |
@@ -66,7 +66,7 @@ L'identité de départ garde l'ADN : bleu « modèle » `#2a78d6`, orange Polyma
 ## 6. Ce qui est périmé et retiré
 
 - Huit sources de prix simulées côte à côte, trois comptes (Instantané, Réaliste, Réaliste + 1 s), bibliothèque de stratégies (jusqu'à 3 par source), rejeu piloté, comparaison de nœuds : retirés avec la purge de l'ancien moteur Node du 2026-10-22 (`docs/reprise-integration-engine.md:12-15`).
-- Fonctionnalités annoncées « non faites » dès l'ancienne interface : comparateur de nœuds dans l'interface, comparaison de deux backtests (`SPEC.md:430, :434`).
+- Fonctionnalités notées « non fait » dans le tableau de l'ancienne interface : comparateur de nœuds dans l'interface, comparaison de deux backtests (`SPEC.md:430, :434`).
 - L'interface du backtest (Live alimenté par le rejeu, frise des sessions) n'a pas d'équivalent dans le périmètre actuel : le backtest du dépôt cible est un outil en ligne de commande (`PROMPT-MIGRATION.md:56`, dépôt cible) `[à vérifier : interface du backtest hors périmètre, à confirmer avec l'utilisateur]`.
 - La section 11 de `SPEC.md` est à confirmer avec l'utilisateur, car l'interface est en cours de réécriture (plan de documentation de la migration).
 

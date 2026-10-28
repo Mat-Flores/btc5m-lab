@@ -79,14 +79,14 @@ Kalshi juge l'éligibilité sur le **pays de résidence déclaré au KYC** (aide
 | KYC | En mai 2026, le VP ingénierie de Polymarket a précisé que le KYC ne concernait qu'un produit bêta. | `RN/axe_B_ordres.md:220` |
 | Dublin (eu-west-1) | Région non restreinte la plus proche du moteur Polymarket ; c'est là que tournent les nœuds `live` et `dry-run`. RTT applicatif mesuré vers le CLOB : 24,4 ms à chaud (p99 29,5). | `SPEC.md:311-313` ; `deploy/README.md:8` ; `E/01-audit.md:185` |
 | Londres (eu-west-2) | Moteur de Polymarket. Le Royaume-Uni est restreint pour les ordres (site et API) : un nœud à Londres sert **uniquement à l'observation** (Oracle Cloud Always Free, nœud C). | `SPEC.md:311-312` ; `deploy/README.md:9`, `:11-13` |
-| Londres écarté | « Nœud à Londres écarté : Royaume-Uni close-only sur le site et l'API ; Dublin est la région ouverte la plus proche. » Gain d'un nœud à Londres estimé à ~10 ms. | `E/JOURNAL.md:27` ; `E/10-delai-appariement.md:121` |
-| RTT Dublin ↔ Londres | ~12 ms (agrégateur public, méthode absente) ; « 0-2 ms » tranché contre (460 km, ≥ 4,6 ms aller-retour en ligne droite). Hypothèse de travail. | `E/00-recherche.md:188` ; `RN/axe_C_strategies.md:269` |
+| Londres écarté | Nœud à Londres écarté (Royaume-Uni close-only sur le site et l'API ; Dublin, eu-west-1, est la région ouverte la plus proche). Gain d'un nœud à Londres estimé à ~10 ms. | `E/JOURNAL.md:27` ; `E/10-delai-appariement.md:121` |
+| RTT Dublin ↔ Londres | ~12 ms (agrégateur public, méthode absente) ; « 1-2 ms » tranché contre (460 km, ≥ 4,6 ms aller-retour en ligne droite). Hypothèse de travail. | `E/00-recherche.md:188` ; `RN/axe_C_strategies.md:269` |
 | Règles qui suivent l'utilisateur | « Ces règles visent aussi l'utilisateur (le pays où il réside), pas seulement le serveur. » | `SPEC.md:325` ; `deploy/README.md:25` |
 | Autres nœuds | Nœud A (machine de l'utilisateur, sortie réseau Montréal) en référence ; nœud B AWS Dublin ; nœud C Oracle Londres (observation). Aucun nœud Berlin n'existe. | `deploy/README.md:5-9` ; `E/JOURNAL.md:34` |
 
 ## 5. Autres points de conformité
 
-- **Dépôts suspects** : un dépôt « arbitrage bot » (531 étoiles) au README npm mais au contenu C# avec DLL précompilées (fort signal d'arnaque) ; un dépôt de binaires précompilés manipulant une clé privée ; plusieurs dépôts promotionnels. Consigne : ne rien télécharger ni exécuter. Source : `E/00-recherche.md:208-210`.
+- **Dépôts suspects** : un dépôt d'arbitrage (531 étoiles) au README npm mais au contenu C# avec DLL précompilées (fort signal d'arnaque) ; un dépôt de binaires précompilés manipulant une clé privée ; plusieurs dépôts promotionnels. Consigne : ne rien télécharger ni exécuter. Source : `E/00-recherche.md:208-210`.
 - **Injection** : la page `latency.glassnode.com/llms.txt` contient des consignes adressées aux agents d'IA (liste d'attente, lien de parrainage) : ignorées et signalées. Source : `E/00-recherche.md:212`.
 - **Manipulation du spot au règlement** : exclue (risque légal et CGU). Source : `E/00-recherche.md:152`.
 - **Sondage de liquidité** par envoi puis annulation : c'est ce que le blocage des annulations pendant la retenue chercherait à empêcher (source : article syndiqué, rumeur). Source : `RN/delais_sources.md:168`.

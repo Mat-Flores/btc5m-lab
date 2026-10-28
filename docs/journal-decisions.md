@@ -121,11 +121,11 @@ Le détail est dans `strategies-maker.md`, `exploration-maker-b01-b10.md`, `wall
 | 2026-10-25/26 | La stratégie d'arcsine ne se réplique pas (meilleur réplica −1,58 $/fenêtre contre +6,37 $ pour le wallet) ; CERTova ne peut pas être rejoué | `engine/maker-bt/WALLETS.md:26-29` |
 | 2026-10-25/26 | Tous les résultats des lots b01 à b10 et des confirmations sont « à revoir » en borne `exact`, retenue nulle | `engine/maker-bt/EXPLORATION.md:243` |
 | 2026-10-25/26 | Les candidats figés (LT-REF, S-E270-HI1…) deviennent tous négatifs avec un spot à jour (x02) ; en spot OKX et borne exacte (x01), espérance nulle | `engine/maker-bt/EXPLORATION.md:248` |
-| 2026-10-26 | « Le signe du résultat de la famille fin de fenêtre dépend de la source de prix (négative en x02, positive en x04) : ce n'est pas encore un résultat robuste » | `engine/maker-bt/WALLETS.md:194` |
+| 2026-10-26 | Le signe du résultat de la famille fin de fenêtre « dépend de la source de prix (négative en x02, positive en x04) : ce n'est pas encore un résultat robuste » | `engine/maker-bt/WALLETS.md:194` |
 
 ## 5. Constat du 2026-10-27 sur dublin-live
 
-Un trader réel est armé sur dublin-live, source okx, dans la session `2026-10-18T23-09-09_live` : 3 ordres réels de 5 $ ont été exécutés, puis des refus pour risque. Détail, sources et statut de vérification : [securite-et-mode-reel.md](securite-et-mode-reel.md) §6. Ce constat a motivé la décision D8.
+Un trader réel est armé sur dublin-live, source okx, dans la session `2026-10-18T23-09-09_live` (vérification de l'orchestrateur en lecture seule par SSH le 2026-10-27) : log « Session started: 2026-10-18T23-09-09_live, ordres réels sur okx » ; `records.jsonl` : 3 `order`, 3 `fill`, 3 `close`, 528 `skip` avec `"account":"real"`. Exécution réelle non confirmée on-chain (pas de hash de transaction) et lien avec les 3 ordres tués du 2026-10-22 non établi `[à vérifier]`. Détail, sources et statut de vérification : [securite-et-mode-reel.md](securite-et-mode-reel.md) §6. Ce constat a motivé la décision D8.
 
 ## 6. Impasses à ne pas rouvrir sans fait nouveau
 

@@ -176,6 +176,6 @@ Sur 6 fenêtres consécutives (2026-10-18, 13:40 à 14:10 ET), les plus gros vol
 ## 9. Ce qui reste ouvert
 
 - Aucune stratégie preneuse n'a été confirmée sur une autre semaine ni sur des ordres réels remplis.
-- La distribution de retenue (p10 0,19 / p50 0,36 / p90 1,5 / max 3,5 s) vient de 3 ordres et du « premier trade après un saut », pas d'une mesure directe `[à vérifier]` (`engine/11-maker-polymarket.md:105`).
+- La distribution de retenue (p10 0,19 / p50 0,36 / p90 1,5 / max 3,5 s) vient de 3 ordres et du premier trade après un saut d'OKX, pas d'une mesure directe `[à vérifier]` (`engine/11-maker-polymarket.md:105`).
 - Le « traitement du moteur d'appariement » supposé nul (`engine/08-strategies.md:83`) et la symétrie de l'aller simple restent `[non vérifié]`.
 - Dans la migration, la référence est simulée par `SimVenue` avec une retenue paramétrable (`taker_hold`) : voir [`architecture-backtest.md`](architecture-backtest.md) §5.

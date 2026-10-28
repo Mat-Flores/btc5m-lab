@@ -113,10 +113,10 @@ Verdicts seulement (le détail est dans les notes brutes `engine/research_notes/
 | Machines d'états d'ordre (Hummingbot, barter-rs, poly-market-maker) | S'inspirer : états « en vol » distincts, état « inconnu » rattachable | `engine/00-recherche.md:166` |
 | Détection de trous (cryptofeed, barter-data) | S'inspirer ; ne pas reprendre cryptofeed (passé en AGPL-3.0) | `engine/00-recherche.md:167` |
 | Journal append-only hors chemin chaud | Reprendre le principe (écrivain unique) ; éviter de réécrire tout un `state.json` | `engine/00-recherche.md:168` |
-| Bots communautaires « HFT », Freqtrade, CCXT, Aeron | À écarter ; leurs gains annoncés sont de simples affirmations | `engine/00-recherche.md:170` ; `…/open_source.md:361-362` |
-| Langage du chemin chaud | Le langage pèse quelques µs à quelques dizaines de µs par message ; l'écart se joue sur la signature et la gigue de GC ; Rust et C++ suppriment la gigue de GC | `…/runtime_client.md:10-12, :138-139` |
-| Signature secp256k1 | Aucun chiffre publié et à jour pour libsecp256k1, k256, go-ethereum ; il faut mesurer sur la cible | `…/runtime_client.md:82-83` |
-| Instance t4g.small | Ligne de base de 20 % par vCPU ; un busy-poll permanent dépasse la ligne de base ; pas de Time Sync « enhanced » sur T4g, donc chrony vers 169.254.169.123 | `…/runtime_client.md:172-173, :222-223` |
+| Bots communautaires « HFT », Freqtrade, CCXT, Aeron | À écarter ; leurs gains annoncés sont de simples affirmations | `engine/00-recherche.md:170` ; `engine/research_notes/Engine réel Polymarket BTC 5m/open_source.md:361-362` |
+| Langage du chemin chaud | Le langage pèse quelques µs à quelques dizaines de µs par message ; l'écart se joue sur la signature et la gigue de GC ; Rust et C++ suppriment la gigue de GC | `engine/research_notes/Engine réel Polymarket BTC 5m/runtime_client.md:10-12, :138-139` |
+| Signature secp256k1 | Aucun chiffre publié et à jour pour libsecp256k1, k256, go-ethereum ; il faut mesurer sur la cible | `engine/research_notes/Engine réel Polymarket BTC 5m/runtime_client.md:82-83` |
+| Instance t4g.small | Ligne de base de 20 % par vCPU ; un busy-poll permanent dépasse la ligne de base ; pas de Time Sync « enhanced » sur T4g, donc chrony vers 169.254.169.123 | `engine/research_notes/Engine réel Polymarket BTC 5m/runtime_client.md:172-173, :222-223` |
 
 Solutions écartées dès la conception : co-location (≤ 6 ms face à 150 ms, conditions inconnues), lots d'ordres, pré-signature (≤ 0,15 ms en Rust), Chainlink Data Streams direct (payant, passerelle aux États-Unis), OKX VIP4/SBE, Limitless (délai 250 ms, carnet vide), Kalshi (non éligible) (`engine/02-conception.md:26-29`). Les dépôts d'arnaque ou commerciaux repérés pendant la recherche sont à ne ni télécharger ni exécuter (`engine/00-recherche.md:206-212`).
 
