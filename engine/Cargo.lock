@@ -3,12 +3,30 @@
 version = 4
 
 [[package]]
+name = "adapter-binance"
+version = "0.1.0"
+dependencies = [
+ "engine-core",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
 name = "adapter-chainlink"
 version = "0.1.0"
 dependencies = [
  "engine-core",
  "proptest",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "adapter-coinbase"
+version = "0.1.0"
+dependencies = [
+ "engine-core",
+ "proptest",
  "serde_json",
 ]
 
@@ -333,7 +351,9 @@ dependencies = [
 name = "engine-app"
 version = "0.1.0"
 dependencies = [
+ "adapter-binance",
  "adapter-chainlink",
+ "adapter-coinbase",
  "adapter-okx",
  "adapter-polymarket",
  "engine-core",
@@ -369,6 +389,7 @@ name = "engine-strategy"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]

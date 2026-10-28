@@ -1,26 +1,31 @@
-//! Paper mode (phase 9): the reference strategy on the live feeds. Each order it decides is built and signed with a
-//! throwaway key and never sent (no execution adapter exists in this binary); the simulated Polymarket execution
-//! matches it after one way plus the taker delay, on the book observed at that instant; the real accounting
-//! (`engine_core::account`, `value`) keeps its books, in a ledger of its own. Every figure here is simulated.
+//! Paper mode (phase 9): the reference strategy on the live feeds. The strategy runs in the engine; each order it
+//! decides (an engine command) is built and signed here with a throwaway key and never sent (no execution adapter
+//! exists in this mode); the simulated Polymarket execution matches it after one way plus the taker delay, on the book
+//! observed at that instant; the real accounting (`engine_core::account`, `value`) keeps its books, in a ledger of its
+//! own. Every figure here is simulated.
 //! The feeds are also captured in the old application's session format (`src/feeds/session.js`), so the old
 //! backtester, `read-session` and `replay/` read a phase 9 run as they read a recorded session.
 use super::Hist;
 use adapter_polymarket::paper::{self as sim, TAKER_DELAY_MS};
 use adapter_polymarket::sign::{self, Signer};
+use engine_app::engine::{Command, Strategy};
+use engine_app::strategies::reference::{RefStrategy, Shared};
 use engine_core::market::Window;
 use engine_core::account::{self, Account, Dir};
 use engine_core::book::Books;
 use engine_core::clock::Clock;
 use engine_core::event::{Payload, Side};
 use engine_core::ledger::{read_all, spawn_writer, Ledger, Stamped, SyncPolicy};
-use engine_core::money::{Micro, MICRO};
+use engine_core::money::Micro;
 use engine_core::order::TradeStatus;
 use engine_core::value::{value, Valuation};
-use engine_strategy::reference::{Config, Event, Fee, Meta, Rec, Reference};
+use engine_strategy::reference::{Config, Event, Rec};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Write;
+use std::rc::Rc;
 use std::sync::Arc;
 
 fn one_way() -> f64 { 12.2 }
@@ -62,12 +67,11 @@ enum Line { Account(account::Fact), Paper(Fact) }
 pub enum Cap { Ev(Event, Option<u64>), Trade { t: f64, a: String, p: Micro, s: Micro, buy: bool, id: String, ts: Option<u64> }, Header(Value) }
 
 struct Pending { id: String, due_ns: u64, token: String, buy: bool, maker: Micro, limit: Micro }
-/// A strategy decision, handed to the live mode (phase 10), which may send it for real.
-pub struct Decided { pub slug: String, pub token: String, pub buy: bool, pub limit: Micro, pub maker: u64, pub taker: u64 }
-struct Market { condition: String, slug: String, fee_rate: Micro, fee_exponent: u32, end_ms: u64 }
+struct Market { condition: String, fee_rate: Micro, fee_exponent: u32, end_ms: u64 }
 
 pub struct Paper {
-    strat: Reference,
+    /// The strategy the engine runs; the paper mode reads what it fed and recorded, and hands it connection switches.
+    strat: Rc<RefCell<RefStrategy>>,
     source: String,
     one_way_ms: f64,
     taker_delay_ms: u64,
@@ -81,13 +85,9 @@ pub struct Paper {
     capture: Option<std::thread::JoinHandle<()>>,
     pub acct: Account,
     markets: HashMap<String, Market>,
-    up: HashMap<String, engine_strategy::reference::Side>,
     /// Source timestamp of each token's last book change, for the age of a match's book.
     book_ms: HashMap<String, u64>,
     pending: Vec<Pending>,
-    /// Decisions not yet taken by the live mode (drained by `main`).
-    pub decided: Vec<Decided>,
-    last_mid: f64,
     last_value: HashMap<String, Micro>,
     /// Last valuation written per token: at most one a second goes to the ledger (measured: 73 451 in 8 min otherwise).
     written_ms: HashMap<String, u64>,
@@ -102,7 +102,8 @@ pub struct Paper {
 }
 
 impl Paper {
-    pub fn open(cfg: PaperCfg, clock: Arc<Clock>) -> Paper {
+    /// The paper mode and the strategy the engine is to run. `oracle`: the configured Chainlink source.
+    pub fn open(cfg: PaperCfg, clock: Arc<Clock>, oracle: String) -> (Paper, Box<dyn Strategy>) {
         let (ledger, rep) = Ledger::open(&cfg.ledger).expect("paper ledger");
         // restart: the paper account is what its ledger says
         let mut acct = Account::default();
@@ -116,31 +117,40 @@ impl Paper {
         let capture = std::thread::Builder::new().name("capture".into()).spawn(move || write_capture(&path, cap_rx)).unwrap();
         // the whole configuration, old engine names: a replay of the capture reads it back as is
         let strategy = serde_json::to_value(&cfg.strategy).unwrap();
+        let source = cfg.strategy.source.clone();
+        let mut r = RefStrategy::new(cfg.strategy, oracle);
+        r.keep = true;
+        let strat = Rc::new(RefCell::new(r));
         let mut p = Paper {
-            source: cfg.strategy.source.clone(), strat: Reference::new(cfg.strategy), one_way_ms: cfg.one_way_ms, taker_delay_ms: cfg.taker_delay_ms, signer, salt: 0, clock,
-            facts, writer: Some(writer), next_seq: rep.entries, cap: Some(cap_tx), capture: Some(capture), acct, markets: HashMap::new(), up: HashMap::new(), book_ms: HashMap::new(), pending: vec![], decided: vec![],
-            last_mid: f64::NAN, last_value: HashMap::new(), written_ms: HashMap::new(), decisions: 0, matched: 0, missed: 0, sign_us: Hist::default(), delay_ms: Hist::default(),
+            strat: strat.clone(), source, one_way_ms: cfg.one_way_ms, taker_delay_ms: cfg.taker_delay_ms, signer, salt: 0, clock,
+            facts, writer: Some(writer), next_seq: rep.entries, cap: Some(cap_tx), capture: Some(capture), acct, markets: HashMap::new(), book_ms: HashMap::new(), pending: vec![],
+            last_value: HashMap::new(), written_ms: HashMap::new(), decisions: 0, matched: 0, missed: 0, sign_us: Hist::default(), delay_ms: Hist::default(),
             strat_us: Hist::default(), strat_pnl: 0.0, strat_closes: 0,
         };
         let id = format!("{}_phase9", chrono_id(p.clock.now().wall_ns));
         p.capture(Cap::Header(json!({ "k": "session", "v": 1, "id": id, "config": strategy, "sources": [p.source], "engine": "engine/app paper",
             "note": "books of the connection the engine used; trades from last_trade_price" })));
         p.fact(Line::Paper(Fact::Config { strategy, one_way_ms: p.one_way_ms, taker_delay_ms: p.taker_delay_ms, signer: "throwaway".into() }));
-        p
+        (p, Box::new(Shared(strat)))
     }
 
     fn fact(&mut self, l: Line) -> u64 { let s = self.next_seq; self.next_seq += 1; let _ = self.facts.send(Stamped { stamp: self.clock.now(), fact: l }); s }
     fn capture(&self, c: Cap) { if let Some(tx) = &self.cap { let _ = tx.send(c); } }
 
-    /// Feeds one strategy event, then turns what the strategy emitted into signed orders and facts.
-    fn feed(&mut self, ev: Event, ts: Option<u64>, now_ns: u64) {
-        let t0 = self.clock.now().mono_ns;
-        self.strat.process(&ev);
-        self.strat_us.push((self.clock.now().mono_ns - t0) as f64 / 1000.0);
-        self.capture(Cap::Ev(ev, ts));
-        for r in std::mem::take(&mut self.strat.records) {
+    /// After an engine input: what the strategy was fed goes to the capture, what it recorded to the ledger in its
+    /// order, its orders (the engine's `cmds`) become signed simulated orders. `us`: time the engine took.
+    pub fn after(&mut self, cmds: &[Command], now_ns: u64, us: f64) {
+        self.strat_us.push(us);
+        let (fed, records) = { let mut s = self.strat.borrow_mut(); (std::mem::take(&mut s.fed), std::mem::take(&mut s.records)) };
+        for (ev, ts) in fed { self.capture(Cap::Ev(ev, ts)); }
+        for (r, id) in records {
             match r {
-                Rec::Order { slug, side, buy, limit, maker, taker, .. } => self.decide(&slug, side, buy, limit, maker, taker, now_ns),
+                Rec::Order { slug, .. } => {
+                    let Some(id) = id else { continue }; // market unknown: no order (as before)
+                    if let Some(Command::Place { intent, maker, taker, .. }) = cmds.iter().find(|c| matches!(c, Command::Place { intent, .. } if intent.client_id == id)) {
+                        self.decide(&slug, &intent.token, intent.side == Dir::Buy, intent.limit, *maker, *taker, now_ns);
+                    }
+                }
                 other => {
                     if let Rec::Close { pnl, .. } = &other { self.strat_pnl += pnl; self.strat_closes += 1; }
                     let rec = rec_json(&other);
@@ -150,11 +160,11 @@ impl Paper {
         }
     }
 
-    fn decide(&mut self, slug: &str, side: engine_strategy::reference::Side, buy: bool, limit: f64, maker: u128, taker: u128, now_ns: u64) {
-        let Some(token) = self.markets.iter().find(|(tok, m)| m.slug == slug && self.up.get(*tok) == Some(&side)).map(|(t, _)| t.clone()) else { return };
+    #[allow(clippy::too_many_arguments)]
+    fn decide(&mut self, slug: &str, token: &str, buy: bool, limit: Micro, maker: u64, taker: u64, now_ns: u64) {
         let t0 = self.clock.now();
         self.salt += 1;
-        let o = sign::Order { salt: self.salt, token_id: token.clone(), maker_amount: maker as u64, taker_amount: taker as u64,
+        let o = sign::Order { salt: self.salt, token_id: token.into(), maker_amount: maker, taker_amount: taker,
             side: if buy { sign::Side::Buy } else { sign::Side::Sell }, timestamp_ms: t0.wall_ns / 1_000_000 };
         let _body = self.signer.body(&o, "00000000-0000-4000-8000-000000000000");
         let id = self.signer.order_hash(&o);
@@ -162,10 +172,8 @@ impl Paper {
         self.sign_us.push(sign_us);
         self.decisions += 1;
         let match_after_ms = sign_us / 1000.0 + self.one_way_ms + self.taker_delay_ms as f64;
-        let limit_micro = (limit * MICRO as f64).round() as Micro;
-        self.fact(Line::Paper(Fact::Decision { id: id.clone(), slug: slug.into(), token: token.clone(), buy, limit: limit_micro, maker: maker as u64, taker: taker as u64, sign_us, match_after_ms }));
-        self.decided.push(Decided { slug: slug.into(), token: token.clone(), buy, limit: limit_micro, maker: maker as u64, taker: taker as u64 });
-        self.pending.push(Pending { id, due_ns: now_ns + (match_after_ms * 1e6) as u64, token, buy, maker: maker as Micro, limit: limit_micro });
+        self.fact(Line::Paper(Fact::Decision { id: id.clone(), slug: slug.into(), token: token.into(), buy, limit, maker, taker, sign_us, match_after_ms }));
+        self.pending.push(Pending { id, due_ns: now_ns + (match_after_ms * 1e6) as u64, token: token.into(), buy, maker: maker as Micro, limit });
     }
 
     /// Matches every order due by `now_ns` on the books of the connection in use (state just before the next event).
@@ -193,21 +201,15 @@ impl Paper {
         }
     }
 
-    pub fn window(&mut self, w: &Window, now_ns: u64, t: f64) {
-        for (tok, side) in [(w.up(), engine_strategy::reference::Side::Up), (w.down(), engine_strategy::reference::Side::Down)] {
-            self.markets.insert(tok.clone(), Market { condition: w.market.clone(), slug: w.slug.clone(), fee_rate: w.fee.rate, fee_exponent: w.fee.exponent, end_ms: w.end * 1000 });
-            self.up.insert(tok.clone(), side);
+    /// A window's markets, for the simulated matches and the account.
+    pub fn window(&mut self, w: &Window) {
+        for tok in &w.tokens {
+            self.markets.insert(tok.clone(), Market { condition: w.market.clone(), fee_rate: w.fee.rate, fee_exponent: w.fee.exponent, end_ms: w.end * 1000 });
         }
-        let fee = (w.fee.rate != 0).then(|| Fee { rate: w.fee.rate as f64 / 1e6, exponent: w.fee.exponent as f64 });
-        let m = Meta { slug: w.slug.clone(), start: w.start as f64, len: (w.end - w.start) as f64, tokens: [w.up().clone(), w.down().clone()], tick: w.tick as f64 / 1e6,
-            min_size: w.min_size as f64 / 1e6, fee, twap: w.twap_s.unwrap_or(60) as f64, price_to_beat: w.price_to_beat.map_or(f64::NAN, |p| p as f64 / 1e6) };
-        self.feed(Event::Meta { t, w: m }, None, now_ns);
     }
 
-    /// Official result: to the strategy (its own positions), and to the paper account, settled by a simulated redemption.
-    pub fn resolved(&mut self, slug: &str, market: &str, winner_token: &str, up_won: bool, price_to_beat: Option<Micro>, now_ns: u64, t: f64) {
-        if let Some(p) = price_to_beat { self.feed(Event::Ptb { t, slug: slug.into(), price_to_beat: p as f64 / 1e6 }, None, now_ns); }
-        self.feed(Event::Res { t, slug: slug.into(), winner: if up_won { "Up" } else { "Down" }.into() }, None, now_ns);
+    /// Official result, to the paper account, settled by a simulated redemption (the strategy is told by the engine).
+    pub fn resolved(&mut self, market: &str, winner_token: &str) {
         if !self.acct.traded(market) { return; }
         let f = account::Fact::Resolved { market: market.into(), winner: winner_token.into() };
         let seq = self.next_seq;
@@ -218,52 +220,25 @@ impl Paper {
         if self.acct.apply(seq, &f) { self.fact(Line::Account(f)); }
     }
 
-    /// One engine event: the strategy sees prices of its source, Chainlink, and the books of the connection in use.
-    pub fn event(&mut self, source: &str, is_chainlink: bool, used_books: bool, e: &engine_core::event::Event, books: Option<&Books>) {
-        let t = e.recv.wall_ns as f64 / 1e6;
-        let now_ns = e.recv.mono_ns;
+    /// One engine event, before the strategy sees it: the age of the books in use, and the trades captured.
+    pub fn observe(&mut self, e: &engine_core::event::Event, used_books: bool) {
+        if !used_books { return; }
         match &e.payload {
-            Payload::Quote { bid, ask } if source == self.source => {
-                // the old application sent a price only when its mid changed (src/feeds/live.js)
-                let mid = (*bid as f64 / 1e6 + *ask as f64 / 1e6) / 2.0;
-                if mid != self.last_mid { self.last_mid = mid; self.feed(Event::Px { t, src: source.into(), p: mid }, e.event_ms, now_ns); }
+            Payload::BookSnapshot { asset, .. } => { self.book_ms.insert(asset.clone(), e.event_ms.unwrap_or(0)); }
+            Payload::BookDelta { changes } => for c in changes { self.book_ms.insert(c.asset.clone(), e.event_ms.unwrap_or(0)); },
+            Payload::Trade { asset, price, size, side, id } => {
+                self.capture(Cap::Trade { t: e.recv.wall_ns as f64 / 1e6, a: asset.clone(), p: *price, s: *size, buy: *side == Side::Bid, id: id.clone(), ts: e.event_ms });
             }
-            Payload::Oracle { value } if is_chainlink => {
-                if let Some(ts) = e.event_ms { self.feed(Event::Cl { t, p: *value as f64 / 1e6, ts: ts as f64 }, Some(ts), now_ns); }
-            }
-            Payload::BookSnapshot { asset, bids, asks, .. } if used_books => {
-                let l = |v: &[engine_core::event::Level]| v.iter().map(|x| (x.price as f64 / 1e6, x.size as f64 / 1e6)).collect();
-                self.book_ms.insert(asset.clone(), e.event_ms.unwrap_or(0));
-                self.feed(Event::Book { t, a: asset.clone(), bids: l(bids), asks: l(asks) }, e.event_ms, now_ns);
-            }
-            Payload::BookDelta { changes } if used_books => {
-                for c in changes { self.book_ms.insert(c.asset.clone(), e.event_ms.unwrap_or(0)); }
-                let ch = changes.iter().map(|c| (c.asset.clone(), c.side == Side::Ask, c.price as f64 / 1e6, c.size as f64 / 1e6)).collect();
-                self.feed(Event::Delta { t, ch }, e.event_ms, now_ns);
-            }
-            Payload::Trade { asset, price, size, side, id } if used_books => {
-                self.capture(Cap::Trade { t, a: asset.clone(), p: *price, s: *size, buy: *side == Side::Bid, id: id.clone(), ts: e.event_ms });
-                self.feed(Event::Other { t }, None, now_ns);
-            }
-            _ => self.feed(Event::Other { t }, None, now_ns),
-        }
-        self.revalue(e, books);
-    }
-
-    /// The connection in use changed: the strategy gets that connection's books whole.
-    pub fn switched(&mut self, books: &Books, assets: &[String], now_ns: u64, t: f64) {
-        for a in assets {
-            let Some(b) = books.get(a) else { continue };
-            let bids = b.bids().map(|(p, s)| (p as f64 / 1e6, s as f64 / 1e6)).collect();
-            let asks = b.asks().map(|(p, s)| (p as f64 / 1e6, s as f64 / 1e6)).collect();
-            self.feed(Event::Book { t, a: a.clone(), bids, asks }, None, now_ns);
+            _ => {}
         }
     }
 
-    pub fn tick(&mut self, now_ns: u64, t: f64) { self.feed(Event::Other { t }, None, now_ns); }
+    /// The connection in use changed: the strategy gets that connection's books whole (its decisions go out with
+    /// the engine's next input).
+    pub fn switched(&mut self, books: &Books, assets: &[String], t: f64) { self.strat.borrow_mut().switched(books, assets, t); }
 
     /// Latent value of each held paper position whose book this event changed (02-conception.md §6).
-    fn revalue(&mut self, e: &engine_core::event::Event, books: Option<&Books>) {
+    pub fn revalue(&mut self, e: &engine_core::event::Event, books: Option<&Books>) {
         if self.acct.open.is_empty() { return; }
         let touched: Vec<String> = match &e.payload {
             Payload::BookSnapshot { asset, .. } => vec![asset.clone()],

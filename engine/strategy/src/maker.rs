@@ -8,7 +8,7 @@
 //! `second(t)` at each whole second, `cl`, `px`, `book` per record; ties in that order (second, cl, px, book).
 //! Exits (tp/sl) differ by design: here a FAK sell is emitted and the position moves when its fill comes back
 //! (`exit_done`), where `sim.mjs` books the result at the decision with a look-ahead book (decision D6).
-use crate::model::{fair_up, jmax, jmin, jround, Vol};
+use crate::model::{fair_up_js as fair_up, jmax, jmin, jround, Vol};
 use serde::{Deserialize, Serialize};
 
 const END: f64 = 300e3;

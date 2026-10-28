@@ -1,0 +1,90 @@
+[
+ {
+  "type": "subscriptions",
+  "channels": [
+   {
+    "name": "ticker",
+    "product_ids": [
+     "BTC-USD"
+    ],
+    "account_ids": null
+   }
+  ]
+ },
+ {
+  "type": "ticker",
+  "sequence": 138450717313,
+  "product_id": "BTC-USD",
+  "price": "80451.66",
+  "open_24h": "80434.18",
+  "volume_24h": "4133.46379410",
+  "low_24h": "80270.68",
+  "high_24h": "81694.39",
+  "volume_30d": "149141.68054544",
+  "best_bid": "80451.66",
+  "best_bid_size": "0.10052156",
+  "best_ask": "80451.67",
+  "best_ask_size": "2.08906194",
+  "side": "sell",
+  "time": "2026-10-28T15:35:14.846847Z",
+  "trade_id": 1111556631,
+  "last_size": "0.00000561"
+ },
+ {
+  "type": "ticker",
+  "sequence": 138450717583,
+  "product_id": "BTC-USD",
+  "price": "80451.67",
+  "open_24h": "80434.18",
+  "volume_24h": "4133.46870768",
+  "low_24h": "80270.68",
+  "high_24h": "81694.39",
+  "volume_30d": "149141.68545902",
+  "best_bid": "80451.66",
+  "best_bid_size": "0.11620115",
+  "best_ask": "80451.67",
+  "best_ask_size": "2.08414836",
+  "side": "buy",
+  "time": "2026-10-28T15:35:15.775920Z",
+  "trade_id": 1111556632,
+  "last_size": "0.00491358"
+ },
+ {
+  "type": "ticker",
+  "sequence": 138450718161,
+  "product_id": "BTC-USD",
+  "price": "80451.67",
+  "open_24h": "80434.18",
+  "volume_24h": "4133.46900235",
+  "low_24h": "80270.68",
+  "high_24h": "81694.39",
+  "volume_30d": "149141.68575369",
+  "best_bid": "80451.66",
+  "best_bid_size": "0.11644880",
+  "best_ask": "80451.67",
+  "best_ask_size": "2.08385369",
+  "side": "buy",
+  "time": "2026-10-28T15:35:17.814923Z",
+  "trade_id": 1111556633,
+  "last_size": "0.00029467"
+ },
+ {
+  "type": "ticker",
+  "sequence": 138450718252,
+  "product_id": "BTC-USD",
+  "price": "80451.67",
+  "open_24h": "80434.18",
+  "volume_24h": "4133.47153889",
+  "low_24h": "80270.68",
+  "high_24h": "81694.39",
+  "volume_30d": "149141.68829023",
+  "best_bid": "80451.66",
+  "best_bid_size": "0.11989674",
+  "best_ask": "80451.67",
+  "best_ask_size": "2.08131715",
+  "side": "buy",
+  "time": "2026-10-28T15:35:18.112927Z",
+  "trade_id": 1111556634,
+  "last_size": "0.00253654"
+ }
+]

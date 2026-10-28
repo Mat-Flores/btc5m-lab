@@ -5,7 +5,7 @@ use adapter_polymarket::sign;
 use engine_core::account::Dir;
 use engine_core::book::{Books, Integrity};
 use engine_core::clock::Stamp;
-use engine_core::event::{Event, Payload, SourceId};
+use engine_core::event::{Event, Payload};
 use engine_core::market::Window;
 use engine_core::money::Micro;
 use engine_core::order::{Input, TradeStatus};
@@ -108,18 +108,19 @@ impl Engine {
                 self.book_changes.clear();
                 let src = e.source as usize;
                 if let Some(books) = self.books.get_mut(src).and_then(|b| b.as_mut()) { apply(books, &e, &mut self.book_changes); }
-                let books = if self.used.get(src) == Some(&true) { self.books[src].as_ref() } else { None };
-                let name = self.sources.get(src).map_or("", |s| s.as_str());
                 for i in 0..self.strategies.len() {
+                    let books = if self.used.get(src) == Some(&true) { self.books[src].as_ref() } else { None };
+                    let name = self.sources.get(src).map_or("", |s| s.as_str());
                     self.strategies[i].on_event(name, &e, books, &mut self.buf);
                     self.emit(i, out);
                 }
             }
             EngineInput::Window(w) => {
-                for i in 0..self.strategies.len() { self.strategies[i].on_window(&w, at, &mut self.buf); self.emit(i, out); }
-                if !self.windows.iter().any(|x| x.start == w.start) { self.windows.push(w); }
+                // known before the strategies hear of it: an order decided now names its market
+                if !self.windows.iter().any(|x| x.start == w.start) { self.windows.push(w.clone()); }
                 // a finished window's metadata is kept an hour, for its late orders and its result
                 if let Some(last) = self.windows.iter().map(|x| x.start).max() { self.windows.retain(|x| x.start + 3600 > last); }
+                for i in 0..self.strategies.len() { self.strategies[i].on_window(&w, at, &mut self.buf); self.emit(i, out); }
             }
             EngineInput::Resolved { market, up_won, price_to_beat, .. } => {
                 for i in 0..self.strategies.len() { self.strategies[i].on_resolved(&market, up_won, price_to_beat, at, &mut self.buf); self.emit(i, out); }

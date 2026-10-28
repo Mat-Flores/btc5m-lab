@@ -1,6 +1,10 @@
-//! The only place that maps a configuration line to an implementation: adding a source is one adapter crate and one
-//! line here.
+//! The only place that maps a configuration name to an implementation: adding a source is one adapter crate and one
+//! line in `feed_adapter`; adding a strategy, one line in `strategy`.
+use crate::engine::Strategy;
+use crate::strategies::{maker::{MakerStrategy, Roles}, reference::RefStrategy};
 use engine_core::feed::Adapter;
+use engine_core::market::MarketSpec;
+use serde_json::Value;
 
 /// The adapter of a configured `adapter` kind. `true`: the adapter carries books.
 pub fn feed_adapter(kind: &str) -> Option<(Box<dyn Adapter>, bool)> {
@@ -8,6 +12,65 @@ pub fn feed_adapter(kind: &str) -> Option<(Box<dyn Adapter>, bool)> {
         "polymarket-market" => Some((Box::new(adapter_polymarket::market::Market), true)),
         "chainlink-rtds" => Some((Box::new(adapter_chainlink::Rtds::default()), false)),
         "okx-bbo-tbt" => Some((Box::new(adapter_okx::BboTbt::default()), false)),
+        "binance-spot" => Some((Box::new(adapter_binance::Spot::default()), false)),
+        "binance-perp" => Some((Box::new(adapter_binance::Perp::default()), false)),
+        "coinbase" => Some((Box::new(adapter_coinbase::Ticker::default()), false)),
         _ => None,
+    }
+}
+
+/// Both strategies keep the 5-minute window's constants of their origin (reference.rs: windows of 300 s; maker:
+/// END = 300 s, TWAP 60 s): another horizon is refused rather than traded wrong.
+const HORIZON_S: u64 = 300;
+
+/// A strategy of a configured `kind`, from its parameters (JSON object).
+/// - "reference": the old engine's configuration keys (`engine_strategy::reference::Config`, camelCase, `source` =
+///   the price source), plus `oracle` (Chainlink source name, default "chainlink"); `maxTau` defaults to the horizon.
+/// - "maker": `sim.mjs` DEFAULTS names (`engine_strategy::maker::Params`), plus `sources` {price, oracle, book},
+///   `capital0` ($, default 1000) and `claim` (s, default 0) of the capital rule (maker-bt/run.mjs).
+pub fn strategy(kind: &str, params: Value, m: &MarketSpec) -> Result<Box<dyn Strategy>, String> {
+    let Value::Object(mut p) = params else { return Err(format!("{kind}: parameters are not an object")) };
+    if matches!(kind, "reference" | "maker") && m.horizon_s != HORIZON_S { return Err(format!("{kind}: horizon {} s not supported (built for {HORIZON_S} s)", m.horizon_s)); }
+    match kind {
+        "reference" => {
+            let oracle = match p.remove("oracle") { Some(Value::String(s)) => s, None => "chainlink".into(), Some(v) => return Err(format!("reference: oracle {v}")) };
+            p.entry("maxTau").or_insert(Value::from(m.horizon_s));
+            let cfg: engine_strategy::reference::Config = serde_json::from_value(Value::Object(p)).map_err(|e| format!("reference: {e}"))?;
+            if cfg.source.is_empty() { return Err("reference: no price source (\"source\")".into()); }
+            Ok(Box::new(RefStrategy::new(cfg, oracle)))
+        }
+        "maker" => {
+            let roles: Roles = p.remove("sources").map_or(Ok(Roles::default()), serde_json::from_value).map_err(|e| format!("maker: sources: {e}"))?;
+            let num = |v: Option<Value>, d: f64, k: &str| v.map_or(Ok(d), |v| v.as_f64().ok_or(format!("maker: {k} not a number")));
+            let capital0 = num(p.remove("capital0"), 1000.0, "capital0")?;
+            let claim = num(p.remove("claim"), 0.0, "claim")?;
+            let params: engine_strategy::maker::Params = serde_json::from_value(Value::Object(p)).map_err(|e| format!("maker: {e}"))?;
+            Ok(Box::new(MakerStrategy::new(params, roles, capital0, claim)))
+        }
+        _ => Err(format!("unknown strategy {kind}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strategies_are_built_from_configuration_and_other_horizons_refused() {
+        let btc = MarketSpec { venue: "polymarket".into(), asset: "btc".into(), horizon_s: 300 };
+        let eth15 = MarketSpec { asset: "eth".into(), horizon_s: 900, ..btc.clone() };
+        let r = strategy("reference", serde_json::json!({ "source": "okx", "minEdge": 0.12 }), &btc).unwrap();
+        assert_eq!(r.sources(), vec!["okx", "chainlink"]);
+        assert!(strategy("reference", serde_json::json!({ "source": "okx" }), &eth15).is_err());
+        assert!(strategy("reference", serde_json::json!({ "source": "okx", "typo": 1 }), &btc).is_err());
+        assert!(strategy("reference", serde_json::json!({}), &btc).is_err());
+        // a candidate of a maker batch file (maker-bt/batches/x01-retest-exact.json), as is
+        let x01 = serde_json::json!({ "id": "X-P88-Dno", "desc": "…", "f": 0.05, "prob": "fair", "price": { "mode": "offset", "offset": 0.01 }, "requote": "follow",
+            "reserveInFlight": true, "liqCap": false, "entryFrom": 270, "quoteEnd": 0, "sideProb": [0.88, 0.999], "maxDiverge": null,
+            "sources": { "price": "okx-btc-usdt-swap", "oracle": "chainlink-rtds", "book": "polymarket-clob" } });
+        assert_eq!(strategy("maker", x01.clone(), &btc).unwrap().sources(), vec!["okx-btc-usdt-swap", "chainlink-rtds", "polymarket-clob"]);
+        assert!(strategy("maker", x01, &eth15).is_err());
+        assert!(strategy("maker", serde_json::json!({ "offset": 0.01 }), &btc).is_err());
+        assert!(strategy("other", serde_json::json!({}), &btc).is_err());
     }
 }
