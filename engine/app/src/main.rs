@@ -1,8 +1,7 @@
 //! Engine binary (phase 4: market data only). Sources come from the configuration; an unlisted source is neither
 //! loaded nor connected. Hot thread: feeds, books, health. Cold thread: window discovery (HTTP). Ledger thread:
 //! facts. Usage: engine <config.json>
-//! Config: {"ledger": "path", "seconds": 600, "sources": [{"name": "polymarket", "adapter": "polymarket-market", "connections": 2},
-//!          {"name": "chainlink", "adapter": "chainlink-rtds", "topics": ["btc/usd"]}]}
+//! Config: every key, with its default, in `config.example.json` (market: BTC 5 minutes by default).
 //!
 //! A book source may run several connections: the delay of a connection depends on the path it lands on (measured:
 //! 82 ms against 9 ms at the same moment). Each connection keeps its own books; the engine uses the books of the
@@ -11,12 +10,13 @@ use adapter_polymarket::account::{self as venue, Holding, Redemption};
 use adapter_polymarket::exec::{self as clob, Clob, Creds, ALLOWED, HOST};
 use engine_core::guard::NetGuard;
 use adapter_polymarket::sign::{self, Signer};
-use adapter_polymarket::windows::{self, Outcome, Window};
+use adapter_polymarket::windows;
+use engine_core::market::{MarketSpec, Window};
 use engine_core::account::{self, Account};
 use engine_core::book::{Books, Integrity};
 use engine_core::clock::Clock;
 use engine_core::event::{Payload, SourceId};
-use engine_core::feed::{self, Adapter, Cmd, Out};
+use engine_core::feed::{self, Cmd, Out};
 use engine_core::ledger::{read_all, spawn_writer, Ledger, Stamped, SyncPolicy};
 use engine_core::guard::{Context, Guards, Limits};
 use engine_core::money::Micro;
@@ -41,8 +41,10 @@ struct SourceCfg { name: String, adapter: String, #[serde(default)] topics: Vec<
 /// The account the engine keeps the books of: `address` holds the shares (read in public at data-api).
 #[derive(Deserialize)]
 struct AccountCfg { #[serde(default)] address: String, #[serde(default)] stop_loss: StopLoss, #[serde(default = "ten")] reconcile_s: u64 }
+/// The market of the original application: Polymarket BTC "Up or Down" 5 minutes.
+fn btc_5m() -> MarketSpec { MarketSpec { venue: "polymarket".into(), asset: "btc".into(), horizon_s: 300 } }
 #[derive(Deserialize)]
-struct Config { ledger: String, seconds: u64, sources: Vec<SourceCfg>, #[serde(default)] bench_orders: bool, #[serde(default)] account: Option<AccountCfg>,
+struct Config { #[serde(default = "btc_5m")] market: MarketSpec, ledger: String, seconds: u64, sources: Vec<SourceCfg>, #[serde(default)] bench_orders: bool, #[serde(default)] account: Option<AccountCfg>,
     /// Paper mode (phase 9): the reference strategy on the live feeds, nothing sent (`paper.rs`).
     #[serde(default)] paper: Option<paper::PaperCfg>,
     /// Live mode (phase 10): the paper strategy's decisions sent for real (`live.rs`); needs `paper` and `account`.
@@ -63,16 +65,6 @@ impl Rec {
     fn send(&self, l: Line) -> u64 { let s = self.next.get(); self.next.set(s + 1); let _ = self.tx.send(Stamped { stamp: self.clock.now(), fact: l }); s }
     /// Writes an accounting fact only if it changes the account (a read repeated every few seconds is not a fact).
     fn keep(&self, a: &mut Account, f: account::Fact) -> bool { a.apply(self.next.get(), &f) && { self.send(Line::Account(f)); true } }
-}
-
-/// The only place that maps a configuration line to an adapter. `true`: the adapter carries books.
-fn adapter(kind: &str) -> Option<(Box<dyn Adapter>, bool)> {
-    match kind {
-        "polymarket-market" => Some((Box::new(adapter_polymarket::market::Market), true)),
-        "chainlink-rtds" => Some((Box::new(adapter_chainlink::Rtds), false)),
-        "okx-bbo-tbt" => Some((Box::new(adapter_okx::BboTbt::default()), false)),
-        _ => None,
-    }
 }
 
 /// A connection whose data arrives this late is replaced (new path) rather than drained: measured, a slow path built
@@ -284,7 +276,8 @@ fn main() {
     // armed, the account is the key's wallet
     let address = cfg.account.as_ref().map(|a| (armed.as_ref().map_or(a.address.clone(), |x| x.signer.wallet.clone()), a.reconcile_s));
     // windows of positions held at startup still need their result
-    let mut unresolved: Vec<u64> = book_keeping.open.values().filter(|p| p.won.is_none()).map(|p| (p.end_ms / 1000).saturating_sub(windows::LEN_S)).collect();
+    let mut unresolved: Vec<u64> = book_keeping.open.values().filter(|p| p.won.is_none()).map(|p| (p.end_ms / 1000).saturating_sub(cfg.market.horizon_s)).collect();
+    let market = cfg.market.clone();
     std::thread::Builder::new().name("cold".into()).spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         rt.block_on(async move {
@@ -293,23 +286,23 @@ fn main() {
             let mut clob_reads: Option<Clob> = None;
             loop {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-                let s = windows::window_start(now);
+                let s = market.window_start(now);
                 // 3 windows ahead: gamma lists them an hour early, and a 7 min gamma outage (2026-10-21) cost a window with 1
-                for start in (0..=3).map(|k| s + k * windows::LEN_S) {
+                for start in (0..=3).map(|k| s + k * market.horizon_s) {
                     if known.contains(&start) { continue; }
-                    if let Ok(Some(w)) = windows::fetch(start).await { known.push(start); unresolved.push(start); if win_tx.send(w).is_err() { return; } }
+                    if let Ok(Some(w)) = windows::fetch(&market, start).await { known.push(start); unresolved.push(start); if win_tx.send(w).is_err() { return; } }
                 }
                 known.retain(|x| *x + 3600 > s);
                 // results: gamma publishes them some time after the end; asked every 15 s, given up after an hour
                 if now >= next_result {
                     next_result = now + 15;
-                    for start in unresolved.clone().into_iter().filter(|x| x + windows::LEN_S + 30 < now) {
-                        if let Ok(Some(w)) = windows::fetch(start).await {
-                            if let Some(o) = &w.winner {
+                    for start in unresolved.clone().into_iter().filter(|x| x + market.horizon_s + 30 < now) {
+                        if let Ok(Some(w)) = windows::fetch(&market, start).await {
+                            if let Some(o) = w.winner {
                                 unresolved.retain(|x| *x != start);
-                                let up_won = *o == Outcome::Up;
-                                let winner = if up_won { w.up } else { w.down };
-                                if cold_tx.send(Cold::Resolved { market: w.condition_id, winner, slug: w.slug, up_won, price_to_beat: w.price_to_beat }).is_err() { return; }
+                                let up_won = o == 0;
+                                let winner = w.tokens[o].clone();
+                                if cold_tx.send(Cold::Resolved { market: w.market, winner, slug: w.slug, up_won, price_to_beat: w.price_to_beat }).is_err() { return; }
                             }
                         }
                     }
@@ -351,7 +344,7 @@ fn main() {
         let mut conns: Vec<Conn> = vec![];
         for (si, s) in cfg.sources.iter().enumerate() {
             for k in 0..s.connections.max(1) {
-                let (a, has_books) = adapter(&s.adapter).unwrap_or_else(|| panic!("unknown adapter {}", s.adapter));
+                let (a, has_books) = engine_app::registry::feed_adapter(&s.adapter).unwrap_or_else(|| panic!("unknown adapter {}", s.adapter));
                 let (cmd, cmd_rx) = mpsc::unbounded_channel();
                 let label = if s.connections > 1 { format!("{}#{}", s.name, k + 1) } else { s.name.clone() };
                 tokio::spawn(feed::run(a, conns.len() as SourceId, s.topics.clone(), clock.clone(), cmd_rx, out_tx.clone()));
@@ -423,15 +416,15 @@ fn main() {
                         let due: Vec<String> = c.broken.iter().filter(|(_, b)| now.mono_ns - b.last_resync >= RESYNC_RETRY_NS).map(|(a, _)| a.clone()).collect();
                         for a in due { c.broken.get_mut(&a).unwrap().last_resync = now.mono_ns; c.resync(&a); }
                         // finished windows: unsubscribe and forget their books
-                        for w in live.iter().filter(|w| w.end() + AFTER_END_S < now_s) {
-                            let _ = c.cmd.send(Cmd::Unsubscribe(vec![w.up.clone(), w.down.clone()]));
-                            for a in [&w.up, &w.down] { c.books.as_mut().unwrap().remove(a); c.broken.remove(a); }
+                        for w in live.iter().filter(|w| w.end + AFTER_END_S < now_s) {
+                            let _ = c.cmd.send(Cmd::Unsubscribe(vec![w.up().clone(), w.down().clone()]));
+                            for a in [w.up(), w.down()] { c.books.as_mut().unwrap().remove(a); c.broken.remove(a); }
                         }
                     }
-                    for w in live.iter().filter(|w| w.end() + AFTER_END_S < now_s) { fact(Fact::WindowDropped { slug: w.slug.clone() }); }
-                    live.retain(|w| w.end() + AFTER_END_S >= now_s);
+                    for w in live.iter().filter(|w| w.end + AFTER_END_S < now_s) { fact(Fact::WindowDropped { slug: w.slug.clone() }); }
+                    live.retain(|w| w.end + AFTER_END_S >= now_s);
                     // the freshest ready connection is used; switching needs a clear advantage
-                    let assets: Vec<&String> = live.iter().filter(|w| w.end() > now_s).flat_map(|w| [&w.up, &w.down]).collect();
+                    let assets: Vec<&String> = live.iter().filter(|w| w.end > now_s).flat_map(|w| [w.up(), w.down()]).collect();
                     let best = book_conns.iter().copied().filter(|&i| conns[i].ready(&assets)).min_by(|&a, &b| conns[a].age_ewma.unwrap_or(f64::MAX).total_cmp(&conns[b].age_ewma.unwrap_or(f64::MAX)));
                     let keep = selected.is_some_and(|s| conns[s].ready(&assets));
                     let switch = match (selected, best) {
@@ -456,17 +449,17 @@ fn main() {
                     if !book_conns.is_empty() && !assets.is_empty() && best.is_none() { used_ms_without_ready += 50.0; }
                 }
                 Some(w) = win_rx.recv() => {
-                    fact(Fact::Window { slug: w.slug.clone(), start: w.start, up: w.up.clone(), down: w.down.clone(), tick: w.tick, min_size: w.min_size, fee_rate: w.fee_rate, fee_exponent: w.fee_exponent, taker_delay: w.taker_delay });
+                    fact(Fact::Window { slug: w.slug.clone(), start: w.start, up: w.up().clone(), down: w.down().clone(), tick: w.tick, min_size: w.min_size, fee_rate: w.fee.rate, fee_exponent: w.fee.exponent, taker_delay: w.taker_delay });
                     // the opening delay is measured only for windows that open while the engine runs
-                    if w.start > boot_s { opens_while_running.insert(w.up.clone(), w.start); opens_while_running.insert(w.down.clone(), w.start); }
+                    if w.start > boot_s { opens_while_running.insert(w.up().clone(), w.start); opens_while_running.insert(w.down().clone(), w.start); }
                     for &i in &book_conns {
-                        for a in [&w.up, &w.down] { let b = conns[i].books.as_mut().unwrap().entry(a); if b.tick == 0 { b.tick = w.tick; } }
-                        let _ = conns[i].cmd.send(Cmd::Subscribe(vec![w.up.clone(), w.down.clone()]));
+                        for a in [w.up(), w.down()] { let b = conns[i].books.as_mut().unwrap().entry(a); if b.tick == 0 { b.tick = w.tick; } }
+                        let _ = conns[i].cmd.send(Cmd::Subscribe(vec![w.up().clone(), w.down().clone()]));
                     }
                     if let Some(p) = paper.as_mut() { let now = clock.now(); p.window(&w, now.mono_ns, now.wall_ns as f64 / 1e6); }
-                    if let Some(u) = user_conn { let _ = conns[u].cmd.send(Cmd::Subscribe(vec![w.condition_id.clone()])); }
-                    seen_tokens.insert(w.up.clone());
-                    seen_tokens.insert(w.down.clone());
+                    if let Some(u) = user_conn { let _ = conns[u].cmd.send(Cmd::Subscribe(vec![w.market.clone()])); }
+                    seen_tokens.insert(w.up().clone());
+                    seen_tokens.insert(w.down().clone());
                     live.push(w);
                 }
                 Some(c) = cold_rx.recv() => match c {
@@ -519,6 +512,7 @@ fn main() {
                         (Some(l), Payload::OrderClosed { order }) => if let Some((_, o)) = l.orders.iter_mut().find(|(_, o)| o.id.as_deref() == Some(order.as_str())) { let _ = o.apply(Input::Closed); },
                         _ => {}
                     },
+                    Out::Frame { .. } | Out::Connected { .. } | Out::Sent { .. } => {} // traced runs only (source-tracing)
                     Out::DecodeError { source, error, head, .. } => fact(Fact::DecodeError { connection: conns[source as usize].label.clone(), error, head }),
                     Out::Health { source, health, at } => {
                         let c = &mut conns[source as usize];
@@ -529,7 +523,7 @@ fn main() {
                                 // become usable again only with their new snapshot
                                 if c.books.is_some() {
                                     let mut fresh = Books::new(0, engine_core::money::MICRO, 200_000_000);
-                                    for w in &live { for a in [&w.up, &w.down] { fresh.entry(a).tick = w.tick; } }
+                                    for w in &live { for a in [w.up(), w.down()] { fresh.entry(a).tick = w.tick; } }
                                     c.books = Some(fresh); c.broken.clear();
                                 }
                             }
@@ -624,16 +618,16 @@ fn main() {
                         // engine latency: from the frame's receive stamp to the state (live values included) being up to date
                         engine_us.push((clock.now().mono_ns - e.recv.mono_ns) as f64 / 1000.0);
                         // bench: the same valuation on a 10-share position of the bench's token, measured under the real load
-                        if let (Some(b), Some(w)) = (bench.as_mut(), live.iter().find(|w| w.end() * 1000 > now_ms)) {
-                            if touched.contains(&w.up) {
-                                let p = account::Position { market: w.condition_id.clone(), token: w.up.clone(), shares: 10_000_000, paid: 5_000_000, fees: 0, fees_measured: false, sold: 0, confirmed: false,
-                                    won: None, fee_rate: w.fee_rate, fee_exponent: w.fee_exponent, end_ms: w.end() * 1000, seqs: vec![] };
+                        if let (Some(b), Some(w)) = (bench.as_mut(), live.iter().find(|w| w.end * 1000 > now_ms)) {
+                            if touched.contains(w.up()) {
+                                let p = account::Position { market: w.market.clone(), token: w.up().clone(), shares: 10_000_000, paid: 5_000_000, fees: 0, fees_measured: false, sold: 0, confirmed: false,
+                                    won: None, fee_rate: w.fee.rate, fee_exponent: w.fee.exponent, end_ms: w.end * 1000, seqs: vec![] };
                                 let t0 = clock.now().mono_ns;
-                                if let Some(v) = value(&p, conns[ci].books.as_ref().and_then(|x| x.get(&w.up)), age) { let _ = stop_loss.triggers(&v, now_ms, p.end_ms); b.value_us.push((clock.now().mono_ns - t0) as f64 / 1000.0); }
+                                if let Some(v) = value(&p, conns[ci].books.as_ref().and_then(|x| x.get(w.up())), age) { let _ = stop_loss.triggers(&v, now_ms, p.end_ms); b.value_us.push((clock.now().mono_ns - t0) as f64 / 1000.0); }
                             }
                         }
-                        if let (Some(b), Some(w)) = (bench.as_mut(), live.iter().find(|w| w.end() > clock.now().wall_ns / 1_000_000_000)) {
-                            if is_quote && e.recv.mono_ns >= b.next_ns { b.order(&w.up.clone(), w.tick, &clock).await; }
+                        if let (Some(b), Some(w)) = (bench.as_mut(), live.iter().find(|w| w.end > clock.now().wall_ns / 1_000_000_000)) {
+                            if is_quote && e.recv.mono_ns >= b.next_ns { b.order(&w.up().clone(), w.tick, &clock).await; }
                         }
                     }
                 },
@@ -643,7 +637,7 @@ fn main() {
             if let Some(l) = real.as_mut() {
                 for d in decided {
                     let now = clock.now();
-                    let Some(w) = live.iter().find(|w| w.up == d.token || w.down == d.token) else { fact(Fact::LiveRefused { slug: d.slug, why: "market unknown".into() }); continue };
+                    let Some(w) = live.iter().find(|w| w.tokens.contains(&d.token)) else { fact(Fact::LiveRefused { slug: d.slug, why: "market unknown".into() }); continue };
                     // shortcut: buys only (the reference holds to settlement, exit "hold"); a sell would need the held size checked
                     if !d.buy { fact(Fact::LiveRefused { slug: d.slug, why: "sell not sent".into() }); continue; }
                     let ctx = Context {
@@ -651,7 +645,7 @@ fn main() {
                         order_pending: l.orders.iter().any(|(_, o)| o.blocks_openings()),
                         reconciled: verdict.as_ref().is_some_and(|v| v.agrees()),
                         clock_synced: l.armed.clock_synced,
-                        prepared: w.end() * 1_000_000_000 > now.wall_ns,
+                        prepared: w.end * 1_000_000_000 > now.wall_ns,
                         // shortcut: realized only; the latent part waits for a run with more than a few orders
                         session_pnl: acct.realized_total(),
                         now_ns: now.mono_ns,
@@ -670,7 +664,7 @@ fn main() {
                     let _ = order.apply(Input::Signed);
                     let n = l.orders.len() as u32;
                     fact(Fact::LiveOrder { n, slug: d.slug, token: d.token.clone(), limit: d.limit, maker: d.maker, taker: d.taker, hash: hash.clone() });
-                    l.orders.push((Meta { token: d.token, market: w.condition_id.clone(), fee_rate: w.fee_rate, fee_exponent: w.fee_exponent, end_ms: w.end() * 1000, decided_ns: now.mono_ns }, order.clone()));
+                    l.orders.push((Meta { token: d.token, market: w.market.clone(), fee_rate: w.fee.rate, fee_exponent: w.fee.exponent, end_ms: w.end * 1000, decided_ns: now.mono_ns }, order.clone()));
                     // the count of this run: once reached, the stop refuses every further opening
                     if l.orders.len() as u32 >= l.max_orders { l.guards.stop.store(true, std::sync::atomic::Ordering::Release); }
                     let _ = l.tx.send(live::ToSend { n, order, req, hash });

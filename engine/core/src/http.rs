@@ -23,10 +23,15 @@ fn tls() -> TlsConnector {
 
 /// GET `url` (https only) and return the body of a 200 answer.
 pub async fn get(url: &str, timeout: Duration) -> Result<Vec<u8>, HttpError> {
+    match get_any(url, timeout).await? { (200, body) => Ok(body), (code, _) => Err(HttpError::Status(code)) }
+}
+
+/// GET `url` (https only): the status and the body, whatever the status.
+pub async fn get_any(url: &str, timeout: Duration) -> Result<(u16, Vec<u8>), HttpError> {
     tokio::time::timeout(timeout, get_inner(url)).await.map_err(|_| HttpError::Timeout)?
 }
 
-async fn get_inner(url: &str) -> Result<Vec<u8>, HttpError> {
+async fn get_inner(url: &str) -> Result<(u16, Vec<u8>), HttpError> {
     let rest = url.strip_prefix("https://").ok_or(HttpError::Url)?;
     let (host, path) = match rest.find('/') { Some(i) => (&rest[..i], &rest[i..]), None => (rest, "/") };
     let io = |e: std::io::Error| HttpError::Io(e.to_string());
@@ -38,22 +43,26 @@ async fn get_inner(url: &str) -> Result<Vec<u8>, HttpError> {
     let mut raw = Vec::new();
     // a server may end the TLS session without close_notify after Connection: close; what was read is kept
     if let Err(e) = s.read_to_end(&mut raw).await { if raw.is_empty() { return Err(io(e)); } }
-    parse(&raw)
+    parse_any(&raw)
 }
 
+#[cfg(test)]
 fn parse(raw: &[u8]) -> Result<Vec<u8>, HttpError> {
+    match parse_any(raw)? { (200, body) => Ok(body), (code, _) => Err(HttpError::Status(code)) }
+}
+
+fn parse_any(raw: &[u8]) -> Result<(u16, Vec<u8>), HttpError> {
     let mut headers = [httparse::EMPTY_HEADER; 64];
     let mut res = httparse::Response::new(&mut headers);
     let head = match res.parse(raw).map_err(|_| HttpError::Malformed("head"))? { httparse::Status::Complete(n) => n, _ => return Err(HttpError::Malformed("head")) };
     let code = res.code.unwrap_or(0);
-    if code != 200 { return Err(HttpError::Status(code)); }
     let h = |name: &str| res.headers.iter().find(|x| x.name.eq_ignore_ascii_case(name)).map(|x| String::from_utf8_lossy(x.value).to_ascii_lowercase());
     let body = &raw[head..];
-    if h("transfer-encoding").is_some_and(|v| v.contains("chunked")) { return dechunk(body); }
+    if h("transfer-encoding").is_some_and(|v| v.contains("chunked")) { return dechunk(body).map(|b| (code, b)); }
     match h("content-length").and_then(|v| v.trim().parse::<usize>().ok()) {
-        Some(n) if body.len() >= n => Ok(body[..n].to_vec()),
+        Some(n) if body.len() >= n => Ok((code, body[..n].to_vec())),
         Some(_) => Err(HttpError::Malformed("short body")),
-        None => Ok(body.to_vec()),
+        None => Ok((code, body.to_vec())),
     }
 }
 
@@ -165,6 +174,11 @@ mod tests {
         assert!(matches!(parse(b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nhello"), Err(HttpError::Malformed(_))));
         assert!(matches!(parse(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhel"), Err(HttpError::Malformed(_))));
         assert!(parse(b"garbage").is_err());
+        // traced reads keep a refusal with its body
+        assert_eq!(parse_any(b"HTTP/1.1 404 Not Found
+Content-Length: 2
+
+no").unwrap(), (404, b"no".to_vec()));
     }
 
     #[test]

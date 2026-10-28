@@ -35,8 +35,15 @@ pub enum Cmd { Subscribe(Vec<String>), Unsubscribe(Vec<String>), Resync }
 pub enum Out {
     Event(Event),
     Health { source: SourceId, at: Stamp, health: Health },
-    /// An unreadable frame: counted and kept (its beginning) for the ledger, never guessed.
+    /// An unreadable frame: counted and kept (its beginning, or the whole frame when traced) for the ledger, never guessed.
     DecodeError { source: SourceId, at: Stamp, error: String, head: String },
+    // the three below only when traced (`run_with(.., trace: true)`), for source-tracing
+    /// Every text frame received, before it is decoded.
+    Frame { source: SourceId, conn: u16, at: Stamp, text: String },
+    /// A connection opened (before its subscriptions are written).
+    Connected { source: SourceId, conn: u16, at: Stamp, url: String },
+    /// A subscription or unsubscription frame written (heartbeats are not).
+    Sent { source: SourceId, conn: u16, at: Stamp, text: String },
 }
 
 const TIMER: Duration = Duration::from_millis(100);
@@ -46,7 +53,14 @@ const STABLE: Duration = Duration::from_secs(10);
 
 /// Runs one source until `out` is closed. Reconnects at once after a drop; backs off only while connections keep
 /// failing quickly.
-pub async fn run(mut a: Box<dyn Adapter>, source: SourceId, mut topics: Vec<String>, clock: Arc<Clock>, mut cmd: UnboundedReceiver<Cmd>, out: UnboundedSender<Out>) {
+pub async fn run(a: Box<dyn Adapter>, source: SourceId, topics: Vec<String>, clock: Arc<Clock>, cmd: UnboundedReceiver<Cmd>, out: UnboundedSender<Out>) {
+    run_with(a, source, 0, topics, clock, cmd, out, false).await
+}
+
+/// `run`, plus, when `trace`, every frame received and written and every connection (`Out::Frame`, `Sent`,
+/// `Connected`), and unreadable frames whole. `conn`: index of this connection within its source, as traced.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_with(mut a: Box<dyn Adapter>, source: SourceId, conn: u16, mut topics: Vec<String>, clock: Arc<Clock>, mut cmd: UnboundedReceiver<Cmd>, out: UnboundedSender<Out>, trace: bool) {
     let mut sup = Supervisor::new(a.caps());
     let mut backoff = Duration::ZERO;
     let mut events = Vec::with_capacity(64);
@@ -62,8 +76,10 @@ pub async fn run(mut a: Box<dyn Adapter>, source: SourceId, mut topics: Vec<Stri
         };
         let (mut tx, mut rx) = ws.split();
         sup.on_connect(clock.now().mono_ns);
+        if trace { let _ = out.send(Out::Connected { source, conn, at: clock.now(), url: a.url() }); }
+        let sent = |f: &String, out: &UnboundedSender<Out>| if trace { let _ = out.send(Out::Sent { source, conn, at: clock.now(), text: f.clone() }); };
         let mut ok = true;
-        for f in a.subscribe_all(&topics) { ok &= tx.send(Message::text(f)).await.is_ok(); }
+        for f in a.subscribe_all(&topics) { sent(&f, &out); ok &= tx.send(Message::text(f)).await.is_ok(); }
         let hb = a.heartbeat();
         let mut hb_tick = tokio::time::interval(hb.as_ref().map_or(Duration::from_secs(3600), |h| h.0));
         hb_tick.tick().await;
@@ -75,6 +91,7 @@ pub async fn run(mut a: Box<dyn Adapter>, source: SourceId, mut topics: Vec<Stri
                         let recv = clock.now();
                         events.clear();
                         let text = msg.to_text().unwrap_or("");
+                        if trace { let _ = out.send(Out::Frame { source, conn, at: recv, text: text.to_string() }); }
                         match a.decode(text, recv, source, &mut events) {
                             Ok(seq) => {
                                 let (v, h) = sup.on_message(recv.mono_ns, seq);
@@ -86,7 +103,7 @@ pub async fn run(mut a: Box<dyn Adapter>, source: SourceId, mut topics: Vec<Stri
                                 }
                             }
                             Err(e) => {
-                                let _ = out.send(Out::DecodeError { source, at: recv, error: e.0, head: text.chars().take(300).collect() });
+                                let _ = out.send(Out::DecodeError { source, at: recv, error: e.0, head: if trace { text.to_string() } else { text.chars().take(300).collect() } });
                                 health(sup.on_decode_error(), &out, recv);
                                 ok = false;
                             }
@@ -99,8 +116,8 @@ pub async fn run(mut a: Box<dyn Adapter>, source: SourceId, mut topics: Vec<Stri
                 _ = timer.tick() => if let Some(h) = sup.on_timer(clock.now().mono_ns) { health(Some(h), &out, clock.now()); ok = false; },
                 _ = hb_tick.tick(), if hb.is_some() => { ok &= tx.send(Message::text(hb.as_ref().unwrap().1.clone())).await.is_ok(); }
                 c = cmd.recv(), if cmd_open => match c {
-                    Some(Cmd::Subscribe(t)) => { let new: Vec<String> = t.into_iter().filter(|x| !topics.contains(x)).collect(); if !new.is_empty() { for f in a.subscribe_more(&new) { ok &= tx.send(Message::text(f)).await.is_ok(); } topics.extend(new); } }
-                    Some(Cmd::Unsubscribe(t)) => { topics.retain(|x| !t.contains(x)); for f in a.unsubscribe(&t) { ok &= tx.send(Message::text(f)).await.is_ok(); } }
+                    Some(Cmd::Subscribe(t)) => { let new: Vec<String> = t.into_iter().filter(|x| !topics.contains(x)).collect(); if !new.is_empty() { for f in a.subscribe_more(&new) { sent(&f, &out); ok &= tx.send(Message::text(f)).await.is_ok(); } topics.extend(new); } }
+                    Some(Cmd::Unsubscribe(t)) => { topics.retain(|x| !t.contains(x)); for f in a.unsubscribe(&t) { sent(&f, &out); ok &= tx.send(Message::text(f)).await.is_ok(); } }
                     Some(Cmd::Resync) => ok = false,
                     None => cmd_open = false,
                 },

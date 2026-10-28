@@ -7,7 +7,7 @@
 use super::Hist;
 use adapter_polymarket::paper::{self as sim, TAKER_DELAY_MS};
 use adapter_polymarket::sign::{self, Signer};
-use adapter_polymarket::windows::Window;
+use engine_core::market::Window;
 use engine_core::account::{self, Account, Dir};
 use engine_core::book::Books;
 use engine_core::clock::Clock;
@@ -194,13 +194,13 @@ impl Paper {
     }
 
     pub fn window(&mut self, w: &Window, now_ns: u64, t: f64) {
-        for (tok, side) in [(&w.up, engine_strategy::reference::Side::Up), (&w.down, engine_strategy::reference::Side::Down)] {
-            self.markets.insert(tok.clone(), Market { condition: w.condition_id.clone(), slug: w.slug.clone(), fee_rate: w.fee_rate, fee_exponent: w.fee_exponent, end_ms: w.end() * 1000 });
+        for (tok, side) in [(w.up(), engine_strategy::reference::Side::Up), (w.down(), engine_strategy::reference::Side::Down)] {
+            self.markets.insert(tok.clone(), Market { condition: w.market.clone(), slug: w.slug.clone(), fee_rate: w.fee.rate, fee_exponent: w.fee.exponent, end_ms: w.end * 1000 });
             self.up.insert(tok.clone(), side);
         }
-        let fee = (w.fee_rate != 0).then(|| Fee { rate: w.fee_rate as f64 / 1e6, exponent: w.fee_exponent as f64 });
-        let m = Meta { slug: w.slug.clone(), start: w.start as f64, len: windows_len(), tokens: [w.up.clone(), w.down.clone()], tick: w.tick as f64 / 1e6,
-            min_size: w.min_size as f64 / 1e6, fee, twap: w.twap_seconds.unwrap_or(60) as f64, price_to_beat: w.price_to_beat.map_or(f64::NAN, |p| p as f64 / 1e6) };
+        let fee = (w.fee.rate != 0).then(|| Fee { rate: w.fee.rate as f64 / 1e6, exponent: w.fee.exponent as f64 });
+        let m = Meta { slug: w.slug.clone(), start: w.start as f64, len: (w.end - w.start) as f64, tokens: [w.up().clone(), w.down().clone()], tick: w.tick as f64 / 1e6,
+            min_size: w.min_size as f64 / 1e6, fee, twap: w.twap_s.unwrap_or(60) as f64, price_to_beat: w.price_to_beat.map_or(f64::NAN, |p| p as f64 / 1e6) };
         self.feed(Event::Meta { t, w: m }, None, now_ns);
     }
 
@@ -301,8 +301,6 @@ impl Paper {
         if let Some(w) = self.writer.take() { w.join().unwrap().expect("paper ledger writer"); }
     }
 }
-
-fn windows_len() -> f64 { adapter_polymarket::windows::LEN_S as f64 }
 
 fn chrono_id(wall_ns: u64) -> String {
     let s = wall_ns / 1_000_000_000;

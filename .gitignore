@@ -1,0 +1,11 @@
+# secrets et réglages locaux
+.env
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+# artefacts
+target/
+node_modules/
+graphify-out/
+# traces enregistrées (seule une petite fixture de test est versionnée)
+source-tracing/trace/*
+!source-tracing/trace/fixture/

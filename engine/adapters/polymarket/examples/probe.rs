@@ -26,7 +26,8 @@ async fn main() {
     clob.deadline = Duration::from_secs(15);
     let req = format!("GET /auth/derive-api-key HTTP/1.1\r\nHost: {HOST}\r\n{}\r\n", s.l1_headers(now_s()));
     let creds = exec::read_creds(&clob.get(req.as_bytes(), Duration::from_secs(5)).await.unwrap()).expect("creds");
-    let w = windows::fetch(windows::window_start(now_s())).await.unwrap().expect("window");
+    let m = engine_core::market::MarketSpec { venue: "polymarket".into(), asset: "btc".into(), horizon_s: 300 };
+    let w = windows::fetch(&m, m.window_start(now_s())).await.unwrap().expect("window");
     println!("window {} tick {}", w.slug, w.tick);
     for _ in 0..5 {
         let t0 = clock.now().mono_ns;
@@ -36,7 +37,7 @@ async fn main() {
     for i in 0..n {
         let (maker, taker) = sign::amounts(sign::Side::Buy, 1_000_000, w.tick.max(10_000), w.tick).unwrap();
         let ts = clock.now().wall_ns;
-        let o = sign::Order { salt: (ts / 1000) & ((1 << 53) - 1), token_id: w.up.clone(), maker_amount: maker, taker_amount: taker, side: sign::Side::Buy, timestamp_ms: ts / 1_000_000 };
+        let o = sign::Order { salt: (ts / 1000) & ((1 << 53) - 1), token_id: w.up().clone(), maker_amount: maker, taker_amount: taker, side: sign::Side::Buy, timestamp_ms: ts / 1_000_000 };
         let body = s.body(&o, &creds.key);
         let req = exec::order_request(HOST, &s, &creds, &body, ts / 1_000_000_000).unwrap();
         let mut order = Order::default();

@@ -74,6 +74,7 @@ async fn faults_make_the_source_invalid_then_it_recovers() {
             Out::Event(e) => { assert_eq!(e.source, 7); if let Payload::Oracle { value } = e.payload { values.push(value); } }
             Out::Health { health: Health::Invalid(r), .. } => reasons.push(r),
             Out::Health { .. } | Out::DecodeError { .. } => {}
+            Out::Frame { .. } | Out::Connected { .. } | Out::Sent { .. } => panic!("traced output without the flag"),
         }
     }
     // every connection re-sent the full subscription
@@ -114,4 +115,39 @@ async fn subscriptions_follow_commands_on_the_open_connection() {
     assert_eq!(got_rx.recv().await.unwrap(), "SUB b"); // only the new topic
     cmd_tx.send(Cmd::Unsubscribe(vec!["a".into()])).unwrap();
     assert_eq!(got_rx.recv().await.unwrap(), "UNSUB a");
+}
+
+/// Traced: the connection, the frames written and every frame received (an unreadable one whole), in order.
+#[tokio::test(flavor = "current_thread")]
+async fn traced_run_reports_connections_and_every_frame() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let long_bad = format!("{{\"seq\":2,\"v\":\"{}\"", "x".repeat(400));
+    let bad = long_bad.clone();
+    tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        let _ = ws.next().await;
+        let _ = ws.send(Message::text("{\"seq\":1,\"v\":5}")).await;
+        let _ = ws.send(Message::text(bad)).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    });
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel();
+    let (_cmd_tx, cmd_rx) = mpsc::unbounded_channel::<Cmd>();
+    tokio::spawn(engine_core::feed::run_with(Box::new(Fake { url: url.clone() }), 3, 2, vec!["a".into()], Arc::new(Clock::new()), cmd_rx, out_tx, true));
+    let mut seen = Vec::new();
+    while seen.len() < 6 {
+        let o = tokio::time::timeout(Duration::from_secs(5), out_rx.recv()).await.unwrap().unwrap();
+        let k = match o {
+            Out::Connected { source: 3, conn: 2, url: u, .. } => { assert_eq!(u, url); "connected".to_string() }
+            Out::Sent { conn: 2, text, .. } => format!("sent {text}"),
+            Out::Frame { conn: 2, text, .. } => format!("frame {}", text.len()),
+            Out::Event(_) => "event".into(),
+            Out::DecodeError { head, .. } => { assert_eq!(head, long_bad); "decode error".into() }
+            Out::Health { .. } => continue,
+            o => panic!("{o:?}"),
+        };
+        seen.push(k);
+    }
+    assert_eq!(seen, vec!["connected".to_string(), "sent SUB a".into(), "frame 15".into(), "event".into(), format!("frame {}", long_bad.len()), "decode error".into()]);
 }

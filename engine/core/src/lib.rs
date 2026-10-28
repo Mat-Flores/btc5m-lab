@@ -9,6 +9,7 @@ pub mod guard;
 pub mod http;
 pub mod key;
 pub mod ledger;
+pub mod market;
 pub mod money;
 pub mod order;
 pub mod reconcile;

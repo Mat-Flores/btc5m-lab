@@ -24,6 +24,10 @@ impl Clock {
 
 impl Default for Clock { fn default() -> Self { Self::new() } }
 
+/// What reads the time: the live clock, or a simulated one (backtest) that a test loop moves itself.
+pub trait Now { fn now(&self) -> Stamp; }
+impl Now for Clock { fn now(&self) -> Stamp { Clock::now(self) } }
+
 #[cfg(test)]
 mod tests {
     use super::*;
