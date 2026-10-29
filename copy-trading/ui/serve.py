@@ -182,6 +182,9 @@ def make_handler(journal, wallet):
             self.wfile.write(body)
 
         def do_GET(self):
+            # contre le DNS rebinding : seule une page servie par 127.0.0.1 / localhost lit le journal
+            if self.headers.get("Host", "").rsplit(":", 1)[0] not in ("127.0.0.1", "localhost"):
+                return self.send(403, "text/plain", b"hote refuse")
             u = urllib.parse.urlparse(self.path)
             q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
             if u.path in STATIC:
