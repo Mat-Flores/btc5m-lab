@@ -11,14 +11,14 @@
 - Vagues 3-4 (366f8a4, 93c7e39, a13ab3f) : inventaire `UI-INVENTAIRE.md`, `PRODUCT.md`, maquettes ; 1re série rejetée, `fusion.html` validée (identité Polymarket, décalages).
 - Vague 5 (361b567) : UI `copy-trading/ui/` (serve.py stdlib, index.html, app.css, app.js, model.js + test node) ; ligne `start` du journal porte la stratégie (pris en compte au prochain déploiement). COMMANDES.md : sections UI et stratégies.
 - UI vérifiée sur données réelles (journal taker du 29 et run maker en direct) par pilotage DevTools : survol → jumeaux allumés liste/graphique/cascade ; clic → sélection, carnet, « Suivre le direct ». 28 tests Rust + 2 tests modèle verts.
+- Revue finale impeccable appliquée (01a633a, 3be03e9 : DNS rebinding, rendu, focus, carnet…) ; `DESIGN.md` + `.impeccable/design.json` écrits depuis l'UI livrée (North Star « L'écart comme forme »). UI terminée.
 - Run de test maker `~/ct-maker` toujours en cours sur dublin-dry-run (lancé 2026-10-29 17:11 UTC) ; service paper principal NON relancé (consigne).
 
 **Reste à faire**
-1. Verdict de la revue impeccable (finish reviewer) : appliquer ses correctifs matériels, puis DESIGN.md (documenter impeccable), commit.
-2. Basculer le service sur la stratégie maker = redéploiement (nouveau run) : seulement sur accord ; puis arrêter `~/ct-maker` (`pkill -f maker.json`).
-3. Lire dans `~/ct-maker/journal.jsonl` les `check` `trade_side` (sens du preneur) et les `order fill`.
-4. Live maker non vérifié sur ordre réel (GTC, annulation, `size_matched`) : premier test réel uniquement avec accord.
-5. Plus tard : analyse statistique de ses ordres (`trade.his_order`, `stat`) ; vérification des news par IA (idée utilisateur).
+1. Basculer le service sur la stratégie maker = redéploiement (nouveau run) : seulement sur accord ; puis arrêter `~/ct-maker` (`pkill -f maker.json`).
+2. Lire dans `~/ct-maker/journal.jsonl` les `check` `trade_side` (sens du preneur) et les `order fill`.
+3. Live maker non vérifié sur ordre réel (GTC, annulation, `size_matched`) : premier test réel uniquement avec accord.
+4. Plus tard : analyse statistique de ses ordres (`trade.his_order`, `stat`) ; vérification des news par IA (idée utilisateur).
 
 **Décisions et pièges**
 - Ses ordres ouverts ne sont pas publics : déduits de ses fills ; annulation après `cancel_after_min` sans fill de lui, et trace des annulations démenties.
@@ -30,10 +30,10 @@
 **Fichiers clés**
 - `src/main.rs` (boucle, `maker`, `post`, `cancel`, `on_public_trade`, `expire`, `poll_rests`), `src/strategy.rs`, `src/maker.rs`.
 - `ui/serve.py` (ssh tail -F, SSE, proxys cache), `ui/model.js` (dérivation testée), `ui/app.js` (rendu, associations), `ui/app.css`.
-- `deploy/`, `COMMANDES.md`, `config.example.json`, `.impeccable/surfaces/ui-index-html.md` (contrat de direction).
+- `deploy/`, `COMMANDES.md`, `config.example.json`, `.impeccable/surfaces/ui-index-html.md` (contrat de direction), `DESIGN.md` (système visuel de l'UI : à suivre pour tout nouvel écran).
 
 **Commandes utiles**
 - Tests : WSL `CARGO_TARGET_DIR=$HOME/ct-target cargo test --release` dans copy-trading/ ; `node --test copy-trading/ui/model.test.mjs`.
 - UI : `python copy-trading/ui/serve.py` (service) ou `--journal /home/ubuntu/ct-maker/journal.jsonl --no-sudo --port 8767` (test), puis http://127.0.0.1:8765/.
 
-**Prochaine action** : appliquer le verdict du finish reviewer impeccable sur `copy-trading/ui/`, recapturer (DevTools), puis lancer le documenter (DESIGN.md) et commiter.
+**Prochaine action** : lire `~/ct-maker/journal.jsonl` sur dublin-dry-run (lecture seule) : `check` `trade_side` et `order fill` ; en faire le bilan, puis demander l'accord pour basculer le service sur maker.

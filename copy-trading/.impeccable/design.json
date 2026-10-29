@@ -1,0 +1,408 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-29T19:49:04.838Z",
+  "title": "Design System: Copy-trading",
+  "extensions": {
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "Nuit",
+        "canonical": "oklch(16.4% 0.011 268.0)",
+        "tonalRamp": [
+          "oklch(15% 0.011 268.0)",
+          "oklch(25% 0.011 268.0)",
+          "oklch(35% 0.011 268.0)",
+          "oklch(45% 0.011 268.0)",
+          "oklch(55% 0.011 268.0)",
+          "oklch(68% 0.011 268.0)",
+          "oklch(82% 0.011 268.0)",
+          "oklch(95% 0.011 268.0)"
+        ]
+      },
+      "s1": {
+        "role": "neutral",
+        "displayName": "Panneau",
+        "canonical": "oklch(20.9% 0.015 266.9)",
+        "tonalRamp": [
+          "oklch(15% 0.015 266.9)",
+          "oklch(25% 0.015 266.9)",
+          "oklch(35% 0.015 266.9)",
+          "oklch(45% 0.015 266.9)",
+          "oklch(55% 0.015 266.9)",
+          "oklch(68% 0.015 266.9)",
+          "oklch(82% 0.015 266.9)",
+          "oklch(95% 0.015 266.9)"
+        ]
+      },
+      "s2": {
+        "role": "neutral",
+        "displayName": "Panneau relevé",
+        "canonical": "oklch(24.0% 0.016 269.0)",
+        "tonalRamp": [
+          "oklch(15% 0.016 269.0)",
+          "oklch(25% 0.016 269.0)",
+          "oklch(35% 0.016 269.0)",
+          "oklch(45% 0.016 269.0)",
+          "oklch(55% 0.016 269.0)",
+          "oklch(68% 0.016 269.0)",
+          "oklch(82% 0.016 269.0)",
+          "oklch(95% 0.016 269.0)"
+        ]
+      },
+      "s3": {
+        "role": "neutral",
+        "displayName": "Panneau sélectionné",
+        "canonical": "oklch(27.8% 0.021 269.3)",
+        "tonalRamp": [
+          "oklch(15% 0.021 269.3)",
+          "oklch(25% 0.021 269.3)",
+          "oklch(35% 0.021 269.3)",
+          "oklch(45% 0.021 269.3)",
+          "oklch(55% 0.021 269.3)",
+          "oklch(68% 0.021 269.3)",
+          "oklch(82% 0.021 269.3)",
+          "oklch(95% 0.021 269.3)"
+        ]
+      },
+      "ln": {
+        "role": "neutral",
+        "displayName": "Filet",
+        "canonical": "oklch(30.9% 0.013 267.1)",
+        "tonalRamp": [
+          "oklch(15% 0.013 267.1)",
+          "oklch(25% 0.013 267.1)",
+          "oklch(35% 0.013 267.1)",
+          "oklch(45% 0.013 267.1)",
+          "oklch(55% 0.013 267.1)",
+          "oklch(68% 0.013 267.1)",
+          "oklch(82% 0.013 267.1)",
+          "oklch(95% 0.013 267.1)"
+        ]
+      },
+      "t1": {
+        "role": "neutral",
+        "displayName": "Texte",
+        "canonical": "oklch(97.0% 0.003 264.5)",
+        "tonalRamp": [
+          "oklch(15% 0.003 264.5)",
+          "oklch(25% 0.003 264.5)",
+          "oklch(35% 0.003 264.5)",
+          "oklch(45% 0.003 264.5)",
+          "oklch(55% 0.003 264.5)",
+          "oklch(68% 0.003 264.5)",
+          "oklch(82% 0.003 264.5)",
+          "oklch(95% 0.003 264.5)"
+        ]
+      },
+      "t2": {
+        "role": "neutral",
+        "displayName": "Texte secondaire",
+        "canonical": "oklch(79.1% 0.014 262.4)",
+        "tonalRamp": [
+          "oklch(15% 0.014 262.4)",
+          "oklch(25% 0.014 262.4)",
+          "oklch(35% 0.014 262.4)",
+          "oklch(45% 0.014 262.4)",
+          "oklch(55% 0.014 262.4)",
+          "oklch(68% 0.014 262.4)",
+          "oklch(82% 0.014 262.4)",
+          "oklch(95% 0.014 262.4)"
+        ]
+      },
+      "t3": {
+        "role": "neutral",
+        "displayName": "Texte discret",
+        "canonical": "oklch(70.4% 0.015 258.4)",
+        "tonalRamp": [
+          "oklch(15% 0.015 258.4)",
+          "oklch(25% 0.015 258.4)",
+          "oklch(35% 0.015 258.4)",
+          "oklch(45% 0.015 258.4)",
+          "oklch(55% 0.015 258.4)",
+          "oklch(68% 0.015 258.4)",
+          "oklch(82% 0.015 258.4)",
+          "oklch(95% 0.015 258.4)"
+        ]
+      },
+      "him": {
+        "role": "primary",
+        "displayName": "Orange Lui",
+        "canonical": "oklch(77.2% 0.174 64.6)",
+        "tonalRamp": [
+          "oklch(15% 0.174 64.6)",
+          "oklch(25% 0.174 64.6)",
+          "oklch(35% 0.174 64.6)",
+          "oklch(45% 0.174 64.6)",
+          "oklch(55% 0.174 64.6)",
+          "oklch(68% 0.174 64.6)",
+          "oklch(82% 0.174 64.6)",
+          "oklch(95% 0.174 64.6)"
+        ]
+      },
+      "him2": {
+        "role": "primary",
+        "displayName": "Orange Lui clair",
+        "canonical": "oklch(82.4% 0.149 73.3)",
+        "tonalRamp": [
+          "oklch(15% 0.149 73.3)",
+          "oklch(25% 0.149 73.3)",
+          "oklch(35% 0.149 73.3)",
+          "oklch(45% 0.149 73.3)",
+          "oklch(55% 0.149 73.3)",
+          "oklch(68% 0.149 73.3)",
+          "oklch(82% 0.149 73.3)",
+          "oklch(95% 0.149 73.3)"
+        ]
+      },
+      "me": {
+        "role": "secondary",
+        "displayName": "Bleu Moi",
+        "canonical": "oklch(56.5% 0.238 265.7)",
+        "tonalRamp": [
+          "oklch(15% 0.238 265.7)",
+          "oklch(25% 0.238 265.7)",
+          "oklch(35% 0.238 265.7)",
+          "oklch(45% 0.238 265.7)",
+          "oklch(55% 0.238 265.7)",
+          "oklch(68% 0.238 265.7)",
+          "oklch(82% 0.238 265.7)",
+          "oklch(95% 0.238 265.7)"
+        ]
+      },
+      "me2": {
+        "role": "secondary",
+        "displayName": "Bleu Moi clair",
+        "canonical": "oklch(64.5% 0.189 265.1)",
+        "tonalRamp": [
+          "oklch(15% 0.189 265.1)",
+          "oklch(25% 0.189 265.1)",
+          "oklch(35% 0.189 265.1)",
+          "oklch(45% 0.189 265.1)",
+          "oklch(55% 0.189 265.1)",
+          "oklch(68% 0.189 265.1)",
+          "oklch(82% 0.189 265.1)",
+          "oklch(95% 0.189 265.1)"
+        ]
+      },
+      "yes": {
+        "role": "tertiary",
+        "displayName": "Vert Oui",
+        "canonical": "oklch(73.7% 0.168 151.6)",
+        "tonalRamp": [
+          "oklch(15% 0.168 151.6)",
+          "oklch(25% 0.168 151.6)",
+          "oklch(35% 0.168 151.6)",
+          "oklch(45% 0.168 151.6)",
+          "oklch(55% 0.168 151.6)",
+          "oklch(68% 0.168 151.6)",
+          "oklch(82% 0.168 151.6)",
+          "oklch(95% 0.168 151.6)"
+        ]
+      },
+      "no": {
+        "role": "tertiary",
+        "displayName": "Rouge Non",
+        "canonical": "oklch(60.4% 0.206 25.9)",
+        "tonalRamp": [
+          "oklch(15% 0.206 25.9)",
+          "oklch(25% 0.206 25.9)",
+          "oklch(35% 0.206 25.9)",
+          "oklch(45% 0.206 25.9)",
+          "oklch(55% 0.206 25.9)",
+          "oklch(68% 0.206 25.9)",
+          "oklch(82% 0.206 25.9)",
+          "oklch(95% 0.206 25.9)"
+        ]
+      },
+      "no2": {
+        "role": "tertiary",
+        "displayName": "Rouge Non clair",
+        "canonical": "oklch(73.5% 0.163 21.9)",
+        "tonalRamp": [
+          "oklch(15% 0.163 21.9)",
+          "oklch(25% 0.163 21.9)",
+          "oklch(35% 0.163 21.9)",
+          "oklch(45% 0.163 21.9)",
+          "oklch(55% 0.163 21.9)",
+          "oklch(68% 0.163 21.9)",
+          "oklch(82% 0.163 21.9)",
+          "oklch(95% 0.163 21.9)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "figure-xl": {
+        "displayName": "Chiffre XL",
+        "purpose": "Cote du marché sélectionné."
+      },
+      "figure": {
+        "displayName": "Chiffre",
+        "purpose": "Valeurs des tuiles lui | moi."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Question du marché sélectionné, logo."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Titres de panneau."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Lignes, carnet, valeurs courantes ; chiffres tabulaires."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "En-têtes de tuile, puces, segments, pastilles."
+      },
+      "axis": {
+        "displayName": "Axe",
+        "purpose": "Graduations de la cascade."
+      }
+    },
+    "shadows": [
+      {
+        "name": "selected-ring",
+        "value": "inset 0 0 0 1px #3262FF",
+        "purpose": "Anneau de la ligne de marché sélectionnée ; seule box-shadow du système."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state",
+        "value": "150ms ease",
+        "purpose": "Fond et couleur au survol (segments, lignes)."
+      },
+      {
+        "name": "value",
+        "value": "300ms ease-out",
+        "purpose": "Largeur des barres de part et de profondeur quand la valeur change."
+      },
+      {
+        "name": "queue",
+        "value": "400ms ease-out",
+        "purpose": "Avance de la barre de file."
+      },
+      {
+        "name": "arrive",
+        "value": "1.6s cubic-bezier(.16,1,.3,1)",
+        "purpose": "Éclair orange à l'arrivée d'un nouveau trade dans la cascade."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "stack",
+        "value": "1279px"
+      },
+      {
+        "name": "mobile",
+        "value": "640px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Puce",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Information de la barre : wallet, mode, stratégie, santé.",
+      "html": "<span class=\"ds-chip\"><i class=\"ds-dot\"></i>Flux <b>sain</b></span> <span class=\"ds-chip ds-paper\">paper</span>",
+      "css": ".ds-chip{height:30px;display:inline-flex;align-items:center;gap:8px;padding:0 12px;border-radius:8px;background:var(--s2,#1C1F27);color:var(--t2,#B6BBC4);font:500 13px Inter,system-ui,sans-serif}.ds-chip b{color:var(--t1,#F4F5F7);font-weight:600}.ds-chip:hover{background:var(--s3,#242833)}.ds-paper{background:rgba(255,153,0,.14);color:var(--him2,#FFB547)}.ds-dot{width:7px;height:7px;border-radius:50%;background:var(--yes,#42C772)}"
+    },
+    {
+      "name": "Segments",
+      "kind": "nav",
+      "refersTo": "segment",
+      "description": "Choix de période ou de filtre ; un seul actif.",
+      "html": "<div class=\"ds-tabs\"><button aria-pressed=\"false\">1 h</button><button aria-pressed=\"true\">24 h</button><button aria-pressed=\"false\">Tout</button></div>",
+      "css": ".ds-tabs{display:inline-flex;background:var(--s2,#1C1F27);border-radius:8px;padding:3px}.ds-tabs button{font:600 12px Inter,system-ui,sans-serif;padding:5px 11px;border:0;border-radius:6px;background:none;color:var(--t3,#9AA0A9);cursor:pointer;transition:background .15s,color .15s}.ds-tabs button:hover{color:var(--t1,#F4F5F7)}.ds-tabs button[aria-pressed=true]{background:var(--ln,#2D3037);color:var(--t1,#F4F5F7)}.ds-tabs button:focus-visible{outline:2px solid var(--me2,#5485FF);outline-offset:2px}"
+    },
+    {
+      "name": "Tuile lui | moi",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Une mesure, lui et moi en face, l'écart en bas.",
+      "html": "<div class=\"ds-tile\"><h3>Délai</h3><div class=\"ds-vr\"><span class=\"ds-h\">lui</span><b>—</b><span>match</span></div><div class=\"ds-vr\"><span class=\"ds-m\">moi</span><b>1,8 s</b><span>médiane</span></div><span class=\"ds-delta\">+1,8 s</span></div>",
+      "css": ".ds-tile{background:var(--s1,#15181F);border:1px solid var(--ln,#2D3037);border-radius:12px;padding:14px;width:220px;display:flex;flex-direction:column;font:13px/1.35 Inter,system-ui,sans-serif;color:var(--t1,#F4F5F7);font-variant-numeric:tabular-nums}.ds-tile h3{font-size:12px;font-weight:600;color:var(--t3,#9AA0A9);margin:0 0 10px}.ds-vr{display:grid;grid-template-columns:36px auto 1fr;gap:8px;align-items:baseline;padding:7px 0}.ds-vr+.ds-vr{border-top:1px solid var(--ln,#2D3037)}.ds-vr b{font-size:20px;font-weight:600;letter-spacing:-.02em}.ds-vr span:last-child{text-align:right;font-size:12px;color:var(--t3,#9AA0A9)}.ds-h{color:var(--him,#FF9900);font-size:12px;font-weight:600}.ds-m{color:var(--me2,#5485FF);font-size:12px;font-weight:600}.ds-delta{margin-top:12px;align-self:flex-start;font-size:12px;font-weight:600;padding:5px 10px;border-radius:6px;background:rgba(226,57,57,.14);color:var(--no2,#FF7A7A)}"
+    },
+    {
+      "name": "Ligne de marché",
+      "kind": "custom",
+      "refersTo": "market-row",
+      "description": "Entrée de la liste : icône, question, parts lui/moi, pastille.",
+      "html": "<button class=\"ds-mk\" aria-selected=\"true\"><span class=\"ds-ic\">NBA</span><span><span class=\"ds-q\">Les Celtics gagnent-ils le titre ?</span><span class=\"ds-bars\"><i><b style=\"width:70%;background:#FF9900\"></b></i><i><b style=\"width:40%;background:#3262FF\"></b></i></span></span><span class=\"ds-pill\">Oui 62¢</span></button>",
+      "css": ".ds-mk{display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:10px;align-items:center;width:300px;padding:9px 14px;border:0;background:var(--s1,#15181F);color:var(--t1,#F4F5F7);font:500 13px/1.25 Inter,system-ui,sans-serif;text-align:left;cursor:pointer;transition:background .15s}.ds-mk:hover{background:var(--s2,#1C1F27)}.ds-mk[aria-selected=true]{background:var(--s3,#242833);box-shadow:inset 0 0 0 1px var(--me,#3262FF);border-radius:8px}.ds-ic{width:36px;height:36px;border-radius:8px;background:var(--s3,#242833);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--t2,#B6BBC4)}.ds-bars{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}.ds-bars i{height:4px;border-radius:2px;background:var(--ln,#2D3037);position:relative;overflow:hidden}.ds-bars b{position:absolute;inset:0 auto 0 0;border-radius:2px}.ds-pill{font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:rgba(66,199,114,.15);color:var(--yes,#42C772)}"
+    },
+    {
+      "name": "Pastilles Oui / Non",
+      "kind": "chip",
+      "refersTo": "pill-yes",
+      "description": "Sens d'une position ou d'un prix.",
+      "html": "<span class=\"ds-p ds-yes\">Oui 62¢</span> <span class=\"ds-p ds-no\">Non 38¢</span>",
+      "css": ".ds-p{font:600 12px Inter,system-ui,sans-serif;padding:3px 8px;border-radius:6px}.ds-yes{background:rgba(66,199,114,.15);color:var(--yes,#42C772)}.ds-no{background:rgba(226,57,57,.15);color:var(--no2,#FF7A7A)}"
+    },
+    {
+      "name": "Niveau de carnet",
+      "kind": "custom",
+      "refersTo": "tag-me",
+      "description": "Prix, profondeur, taille ; mes niveaux teintés, étiquettes lui/moi.",
+      "html": "<div class=\"ds-bk\"><div class=\"ds-lv\"><span>61¢<em class=\"ds-tag ds-th\">lui</em></span><span></span><span>1 240</span><i style=\"width:60%;background:rgba(66,199,114,.14)\"></i></div><div class=\"ds-lv ds-mine\"><span>60¢<em class=\"ds-tag ds-tm\">moi</em></span><span></span><span>25</span><i style=\"width:20%;background:rgba(66,199,114,.14)\"></i></div></div>",
+      "css": ".ds-bk{width:290px;font:13px Inter,system-ui,sans-serif;color:var(--t1,#F4F5F7);font-variant-numeric:tabular-nums}.ds-lv{display:grid;grid-template-columns:110px 1fr 80px;align-items:center;height:27px;position:relative}.ds-lv>span{position:relative;z-index:1}.ds-lv span:first-child{padding-left:8px}.ds-lv span:last-child{text-align:right;padding-right:8px;color:var(--t2,#B6BBC4)}.ds-lv i{position:absolute;right:0;top:3px;bottom:3px;border-radius:3px}.ds-mine{background:rgba(50,98,255,.08);border-radius:6px}.ds-tag{font-style:normal;font-size:12px;font-weight:600;padding:2px 8px;border-radius:5px;margin-left:6px}.ds-th{background:rgba(255,153,0,.16);color:var(--him2,#FFB547)}.ds-tm{background:rgba(50,98,255,.2);color:var(--me2,#5485FF)}"
+    },
+    {
+      "name": "Ligne de cascade",
+      "kind": "custom",
+      "refersTo": "cascade-row",
+      "description": "Signature : son match → ma détection → mon ordre → mon fill, échelle log.",
+      "html": "<div class=\"ds-wr\"><span class=\"ds-t\">14:02</span><span>Achat Oui 61¢</span><svg width=\"220\" height=\"14\"><rect x=\"0\" y=\"5\" width=\"48\" height=\"4\" rx=\"2\" fill=\"#FF9900\"/><rect x=\"48\" y=\"5\" width=\"10\" height=\"4\" fill=\"#9AA0A9\"/><line x1=\"58\" x2=\"150\" y1=\"7\" y2=\"7\" stroke=\"#3262FF\" stroke-width=\"3\"/><circle cx=\"150\" cy=\"7\" r=\"4\" fill=\"#3262FF\"/></svg><span class=\"ds-o\">rempli 60¢</span></div>",
+      "css": ".ds-wr{display:grid;grid-template-columns:70px 150px 230px 120px;align-items:center;min-height:31px;padding:0 14px;border-top:1px solid var(--ln,#2D3037);background:var(--s1,#15181F);color:var(--t1,#F4F5F7);font:13px Inter,system-ui,sans-serif;font-variant-numeric:tabular-nums;animation:ds-arrive 1.6s cubic-bezier(.16,1,.3,1);transition:background .15s}.ds-wr:hover{background:var(--s2,#1C1F27)}.ds-t{color:var(--t3,#9AA0A9)}.ds-o{padding-left:14px}@keyframes ds-arrive{from{background:rgba(255,153,0,.22)}}@media (prefers-reduced-motion:reduce){.ds-wr{animation:none}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "L'écart comme forme",
+    "overview": "Un seul écran où le wallet suivi (lui) et le bot (moi) partagent chaque vue. L'écart entre eux ne se lit pas en comparant deux colonnes : il se voit, comme une ligne grisée entre deux courbes, un segment qui s'allonge dans la cascade ou une barre de file qui avance. Le système refuse le tableau de bord en deux moitiés miroir et le mur de cartes de chiffres.\n\nLe monde visuel reprend l'identité sombre de Polymarket : fonds bleu-noir étagés, filets fins, Inter, prix en ¢, pastilles Oui/Non teintées, icônes de marché carrées arrondies. Il s'agit d'un poste de travail (mode Operate) pour un opérateur unique sur grand écran (≥ 1440 px), ouvert des heures : densité élevée, chiffres tabulaires, mouvement réduit à ce qui signale une arrivée ou un changement de valeur.\n\nUn fait observé ou rien : une valeur non mesurée s'affiche grisée (« — », « non mesuré »), jamais estimée.",
+    "keyCharacteristics": [
+      "Deux couleurs d'acteur réservées : orange = lui, bleu = moi, partout et seulement pour ça.",
+      "Aplats tonaux sans ombre ; la profondeur vient de l'étagement bg → s1 → s2 → s3.",
+      "Chiffres tabulaires partout (`font-variant-numeric: tabular-nums`).",
+      "Associations : survoler ou cliquer un élément allume ses jumeaux (liste, graphique, cascade) et atténue le reste."
+    ],
+    "rules": [
+      {
+        "name": "La règle des deux voix",
+        "body": "L'orange et le bleu désignent un acteur, jamais une catégorie, un état ou une décoration. Un élément qui n'est ni à lui ni à moi reste neutre.",
+        "section": "colors"
+      },
+      {
+        "name": "La règle du rouge qui coûte",
+        "body": "Le rouge signifie coût, perte, Non ou alerte, rien d'autre. Un écart défavorable passe en rouge, un écart favorable en vert, un écart neutre en gris.",
+        "section": "colors"
+      },
+      {
+        "name": "La règle des colonnes qui ne bougent pas",
+        "body": "Toute valeur numérique est en chiffres tabulaires pour que les colonnes restent alignées quand les valeurs changent en direct.",
+        "section": "typography"
+      },
+      {
+        "name": "La règle du plat",
+        "body": "Rien ne flotte. Un état (survol, sélection, focus) monte d'un cran de fond ou reçoit un anneau, jamais une ombre.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** réserver #FF9900 à lui et #3262FF à moi, dans chaque vue.",
+      "**Do** afficher une valeur absente comme telle (« — », texte discret #9AA0A9), jamais une estimation.",
+      "**Do** donner un jumeau en face à chaque donnée et les relier par survol et clic (classe `hl`, conteneur `dimming`).",
+      "**Do** utiliser les chiffres tabulaires et les prix en ¢.",
+      "**Do** teinter les pastilles à 14–20 % de leur couleur, texte dans la variante claire.",
+      "**Do** couper toute animation sous `prefers-reduced-motion: reduce`."
+    ],
+    "donts": [
+      "**Don't** construire deux moitiés miroir lui / moi ni un mur de cartes de chiffres.",
+      "**Don't** utiliser l'orange ou le bleu pour une catégorie, un état ou une décoration.",
+      "**Don't** ajouter d'ombre portée ni de dégradé décoratif (seul l'avatar du wallet porte un dégradé).",
+      "**Don't** utiliser le rouge pour autre chose qu'un coût, une perte, Non ou une alerte.",
+      "**Don't** ajouter de bouton qui agit sur le bot : l'UI est en lecture seule."
+    ]
+  }
+}
