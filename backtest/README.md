@@ -4,7 +4,7 @@ Rejoue les stratégies de l'engine sur des données enregistrées, avec un excha
 
 ## Commandes
 
-Rust ne tourne que dans WSL `Ubuntu-24.04`. Depuis Git Bash, préfixer les appels de `MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu-24.04 -- bash`.
+Rust ne tourne que dans WSL `Ubuntu-24.04`. Depuis Git Bash, préfixer les appels de `MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu-24.04 -- bash`. Une commande qui contient des `$` passe par un script : sinon Git Bash les développe avant WSL.
 
 | Commande | Rôle |
 |---|---|
@@ -38,6 +38,7 @@ Limites du mode trace (mesurées le 2026-10-28) :
 - **Résultats officiels** : les traces courantes du 28/10 n'en ont aucun (le traceur cessait d'interroger gamma 120 s après la fin d'une fenêtre, le résultat arrive ≈ 5 min après) : aucun marché n'y est réglé. Traceur corrigé et redéployé le 2026-10-29 à 02:11 UTC (900 s) : vérifié sur le 29/10, 171/171 marchés réglés, `"closed":true` 136 à 723 s après la fin.
 - **Gamma interrogé toutes les 10 s** : chaque fenêtre et chaque résultat ne sont donnés qu'une fois à l'engine.
 - **Fichiers d'un hôte secondaire** (`<jour>.<hôte>.old.jsonl.gz`, D5) : ignorés, seul le fichier canonique du jour est lu.
+- **Session tronquée** : le `.jsonl.gz` de la session `2026-10-16T01-17-20_dublin` (dépôt source) est tronqué.
 
 ## Configuration
 
