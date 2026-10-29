@@ -2,46 +2,39 @@
 
 **Branche** : `main` (branche unique, pas de remote).
 
-**Objectif** : exécuter `PROMPT-MIGRATION.md` (spécification, ne jamais la modifier ; les décisions utilisateur du 2026-10-28 ci-dessous la PRIMENT) : migrer `C:\dev\REA Projects\btc5m-lag-sim` (LECTURE SEULE) vers ce dépôt. L'orchestrateur délègue, valide lui-même (relance les vérifs) et fait tous les commits.
+**Objectif** : migration `btc5m-lag-sim` → `updown5m-lab` (spec `PROMPT-MIGRATION.md`, décisions utilisateur des 27-28/10 qui la priment) : TERMINÉE le 2026-10-28, hors redéploiement du traceur (décision utilisateur).
 
-## Fait
-- Phase 1 : contrats et décisions D1-D9, E1-E2 dans `docs/contrats-migration.md` (À LIRE EN PREMIER, « Règles communes » à recopier dans chaque prompt de subagent).
-- Commités : `.claude/`+`CLAUDE.md`, `deploy/`, `source-tracing/`+`convert/`, `docs/`, `engine/` (285fe6a, 5e6197f : 131 tests, parité replay identique, `runtime` en config), test source-tracing durci (25c8791).
-- 2026-10-28 : `trading-gap.service` arrêté + désactivé sur dublin-dry-run et dublin-live (seul service applicatif, aucun docker, aucun cron utilisateur).
+## Fait (vérifié le 2026-10-28)
+- engine, source-tracing, backtest, docs, README (racine, engine, source-tracing, backtest, docs) commités.
+- Backtest : entrée `pack` (validée : `validate` + lots x01/x04 à 0 écart avec l'oracle Node) et entrée `trace` (`backtest/src/run.rs` : Engine + TraceVenue ; parité avec `replay` hors décalage d'horloge des anciennes sessions).
+- E1 : correction 1 `venue.cancel_ahead_factor` (défaut 1, 0,5 recommandé) ; correction 2 non retenue (erreur de mesure de `validate`).
+- p9/p10 rejoués identiques au live ; staging `updown5m-staging/` entièrement supprimé.
+- Tracing actif sur « Up&Down-Tracing » (+5,5 Mo/min) ; `pull` réel du 28/10 OK (8 fichiers, sha256 vérifiés).
+- docs/ restructuré : racine = projet, `recherche/`, `migration/`, `pistes-ecartees.md`, 0 lien cassé.
 
-## En cours
-- Rapatriement FINI et vérifié (2026-10-28) : dry-run 10 012 fichiers, live 888 + /tmp + p9/p10 (24 fichiers, sans wallet) dans `updown5m-staging/dublin-live/home`. Les 2 nœuds sont NETTOYÉS (service, /opt, /var/lib/tgap, tgap, node, rust, p9/p10, /tmp) ; l'utilisateur les stoppe dans la console.
-- Déploiement tracing commité : build WSL (`deploy/build-wsl.sh`) + envoi du binaire seul, garde disque 30 Go, tests 32 PASS. DÉPLOYÉ en réel le 2026-10-28 20:33 UTC ; menus start/stop/pull --dry-run testés OK par l'utilisateur sur 34.247.53.227 : 8 sources connectées, RSS 7 Mo ; vérif de `start` via status.json (gzip écrit par blocs, la taille ne prouve rien au démarrage).
-- Conversion des traces terminée et validée : `source-tracing/convert/convert.mjs --out source-tracing/trace ...` a produit 374 fichiers finaux, 0 `.tmp`, 30 sessions converties, `source-tracing/convert-report.json` avec `conservation_ok: true`. Le rapport confirme 1 136 904 027 lignes lues, 1 136 903 499 lignes mappées/sorties, 0 unreadable.
-
-## Reste à faire (dans l'ordre)
-1. FAIT : EC2 dublin-* stoppées, ancienne instance 61 Go supprimée (utilisateur, 2026-10-28).
-2. FAIT : Conversion de tout (staging + `data/` local du source) : `node source-tracing/convert/convert.mjs --out source-tracing/trace <entrées>` + vérif ; les traces sont dans le projet (`source-tracing/trace/`, gitignoré, jamais commité), et le rapport final `source-tracing/convert-report.json` confirme `conservation_ok: true`.
-   FAIT (2026-10-28) : staging supprimé sauf `engine-baseline/` et `dublin-live/home/{p9,p10}` (1,5 Go, captures + décisions de l'engine Rust en direct) ; ces 2 restes à supprimer dès que le backtest a passé sa non-régression (p9/p10 = phase B).
-3. source-tracing : supprimer l'idée d'UI (contrat 3 caduc) ; `source-tracing/COMMANDES.md` + 3 commandes interactives et visuelles (couleurs, barres de progression) : lancer le tracing sur le serveur en choisissant les sources ; désactiver des sources choisies ; rapatrier les dernières sessions. Cible : NOUVELLE instance « Up&Down-Tracing » à Dublin (créée par l'utilisateur), plus dublin-dry-run.
-4. backtest/ : config globale JSON (`backtest/config/default.json`, E2) + UN fichier de config par stratégie en TOML (commentaires = description détaillée de la stratégie et de chaque paramètre) ; constantes de stratégie de l'engine (KEEP_NS, END/T_END/K_TAPE, WINDOW/FLOOR/PRIOR, HORIZON_S, capital0, claim) y passent, défauts inchangés. Signal par défaut binance-spot.
-4b. APRÈS phase A validée (idée 2026-10-28, pas encore décidée) : mesurer au backtest le PnL des fenêtres « choc » avec/sans `no_knife`, `max_diverge`, `max_imbalance`, `Move` (`engine/strategy/src/maker.rs:22-77`). Si des pertes se concentrent autour des annonces macro → paramètres TOML à ajouter : `macro_calendar` (liste d'horaires UTC CPI/FOMC/NFP), `macro_pause_before_s`, `macro_pause_after_s` (suspend la cotation). Valider en walk-forward + Monte Carlo (p-value PnL, drawdown) sur résultats par fenêtre, sans dépendance. VON/IA news écarté (news plus lente que le prix, non backtestable, archivé).
-1. README (8 + racine), phase 4 vérifs, `graphify update .`, rapport final.
-2. EN TOUT DERNIER (mission achevée) : purger de `docs/` tout ce qui contredit les décisions actuelles, pour un code et une doc parfaitement alignés. Les décisions et pistes écartées sont factorisées et synthétisées dans UN fichier dédié (ex. `docs/pistes-ecartees.md` : quoi, pourquoi écarté, date, preuve) pour que Claude ne réexplore pas ces pistes. Vérifier chaque affirmation de doc contre le code. Dans la même étape finale, restructurer `docs/` : à la racine, ce qui décrit le projet ; en sous-dossiers, ce qui le source (travaux de recherche). Mettre à jour tous les liens.
+## Reste à faire
+1. Redéployer le traceur (`source-tracing/deploy/start`) pour `gamma_prev_grace_s` = 900 : sans cela les traces courantes n'ont aucun résultat officiel (backtest sans règlement).
+2. `pull` quotidien (≈ 4 Go/jour, 25 Go libres sur le serveur).
+3. Idée non décidée : PnL des fenêtres « choc » avec/sans `no_knife`, `max_diverge`, `max_imbalance`, `Move`, puis éventuelle pause sur calendrier macro (TOML `macro_calendar`…), validée en walk-forward + Monte Carlo.
+4. Écart engine connu : tick 0,001 refusé (tick de la fenêtre figé, `engine/app/src/engine.rs` `amounts`) ; à décider avant tout backtest maker sur traces.
+5. Décider : `cancel_ahead_factor` 0,5 par défaut ? `source-tracing/convert-report.json` à commiter ou ignorer ?
 
 ## Décisions et pièges
-- 2026-10-28 utilisateur : historique git laissé tel quel ; garder SA version de `CLAUDE.md` (noter l'écart au rapport) ; signal backtest binance-spot ms σ×1,3 configurable, moyenne Binance+Coinbase = option ; OKX reste enregistré.
-- 2026-10-28 utilisateur, PRIME la spec : couper entièrement les 2 instances (apps arrêtées, puis EC2 stop) ; wallets sans capital, aucun risque, ne pas s'en soucier ; plus d'UI ; plus de déploiement sur dublin-dry-run ; format config stratégie laissé à mon choix → TOML (ajout de la crate `toml`).
-- Gratuit (D3) : trace Polymarket ≈ 4 Go/jour → `pull-traces` quotidien + garde disque.
-- Rust seulement dans WSL `Ubuntu-24.04` (`~/.cargo/bin/cargo`, `CARGO_TARGET_DIR=$HOME/...`). Depuis Git Bash vers WSL : `MSYS_NO_PATHCONV=1` et passer par un script (les guillemets cassent).
+- `copy-trading/` : projet isolé de l'utilisateur, ne jamais le lire ni le commiter ; commiter avec `git commit -- <chemins>` (l'utilisateur stage lui-même). Exclu de graphify (`graphify-out/.graphify_build.json`).
+- Rust seulement dans WSL `Ubuntu-24.04` ; depuis Git Bash : `MSYS_NO_PATHCONV=1` et passer par un script (les `$` sont sinon développés par Git Bash).
+- Binance n'est enregistré que 14→17/10 et 26→28/10 : le signal par défaut n'existe pas les autres jours.
+- Les anciennes traces Node n'ont ni trades ni conditionId : borne `exact` sans fills de trade, marché = slug.
 - Le `.jsonl.gz` de `2026-10-16T01-17-20_dublin` (source) est tronqué.
-- Max 6 subagents ; 1 relance par livrable refusé, au 2e échec STOP.
 
 ## Fichiers clés
-- `docs/contrats-migration.md` ; `docs/architecture-backtest.md` (cible backtest) ; `source-tracing/convert/MAPPING.md` ; `deploy/pull-traces`, `deploy/updown5m@.service`.
-- Instance tracing « Up&Down-Tracing » : `ubuntu@34.247.53.227`, clé `C:\Users\mathe\.ssh\Up&Down.pem` ; Ubuntu 26.04, 2 vCPU, 1,8 Gio RAM, disque 61 Go.
-- SERVEURS : dry-run `ubuntu@108.130.16.251` (`~/.ssh/dublin-dry-run.pem`), live `ubuntu@3.253.60.148` (`~/.ssh/dublin-live.pem`) ; données dans `/var/lib/tgap/data` (sudo).
+- `backtest/README.md` (usage, paramètres, limites) ; `backtest/src/run.rs` (mode trace) ; `backtest/src/venue.rs` (exchange validé).
+- `docs/README.md` (index) ; `docs/exploitation.md` (serveur, routine) ; `docs/pistes-ecartees.md`.
+- `source-tracing/COMMANDES.md` ; `source-tracing/deploy/{start,stop,pull}`.
 
 ## Commandes utiles
-- Tests engine : `wsl.exe -d Ubuntu-24.04 -- bash -c 'cd "/mnt/c/dev/REA Projects/updown5m-lab/engine" && CARGO_TARGET_DIR=$HOME/eng-target ~/.cargo/bin/cargo test --workspace'` (idem `source-tracing/`).
-- Parité : `updown5m-staging/engine-baseline/replay.sh after` puis `cmp` avec `replay-before-*`.
+- Tests : `MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu-24.04 -- bash "/mnt/c/dev/REA Projects/updown5m-lab/backtest/scripts/test-wsl.sh"`.
+- Non-régression : `backtest/scripts/validate-wsl.sh` (≈ 11 min), `batch-wsl.sh x01-retest-exact`.
+- Backtest sur traces : `backtest run --config config/default.json --override <f.json>` (dans WSL, depuis `backtest/`).
 
 ## Prochaine action
-FAIT le 2026-10-28 (3e session) : phase A commitée ; E1 correction 1 (`cancel_ahead_factor`, 0,5 recommandé, défaut 1) ; correction 2 = erreur de mesure de `validate`, pas d'option ; mode `trace` du backtest (`backtest/src/run.rs`) vérifié (parité replay hors horloge des anciennes sessions) ; p9/p10 rejoués identiques au live ; staging supprimé en entier ; README racine/engine/source-tracing/backtest ; phase 4 : tests OK, validate + lots x01/x04 à 0 écart, tracing actif (+5,5 Mo/min), pull réel du 28/10 OK (8 fichiers).
-RESTE : (1) ménage final de `docs/` (purge, `docs/pistes-ecartees.md`, racine = projet, sous-dossiers = recherche, liens) ; (2) redéployer le traceur (`source-tracing/deploy/start`, décision utilisateur) pour `gamma_prev_grace_s` 900 : les traces courantes n'ont sinon aucun résultat officiel ; (3) rapport final.
-Ne jamais lire ni commiter `copy-trading/` (projet isolé de l'utilisateur ; commits avec `git commit -- <chemins>`).
+Demander à l'utilisateur le feu vert pour `source-tracing/deploy/start` (redéploiement du traceur avec 900 s de suivi gamma), puis vérifier le lendemain qu'un `pull` ramène des lignes `http` gamma avec `"closed":true`.
