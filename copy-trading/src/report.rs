@@ -597,12 +597,17 @@ fn copy_row(trade: &Value) -> Vec<Segment> {
     ])
 }
 
+/// Copié = un ordre est réellement parti (live) ou a été joué sur le carnet (paper). Une décision de vente sous le
+/// minimum d'ordre n'exécute rien : elle compte avec les ignorés, motif compris.
+fn executed(trade: &Value) -> bool {
+    (trade["decision"] == "buy" || trade["decision"] == "sell")
+        && (trade.get("fill_shares").is_some()
+            || trade.get("order").is_some()
+            || finite(&trade["lat"]["sent"]).is_some())
+}
+
 fn copy_summary(trades: &[&Value]) -> [Vec<Segment>; 2] {
-    let copies: Vec<&Value> = trades
-        .iter()
-        .copied()
-        .filter(|trade| trade["decision"] == "buy" || trade["decision"] == "sell")
-        .collect();
+    let copies: Vec<&Value> = trades.iter().copied().filter(|t| executed(t)).collect();
     let filled: Vec<(&Value, (f64, f64, f64))> = copies
         .iter()
         .filter_map(|trade| copy_fill(trade).map(|fill| (*trade, fill)))
@@ -628,14 +633,31 @@ fn copy_summary(trades: &[&Value]) -> [Vec<Segment>; 2] {
         .collect();
     let his_stake: f64 = stakes.iter().map(|(his_usd, _)| his_usd).sum();
     let my_stake: f64 = stakes.iter().map(|(_, my_usd)| my_usd).sum();
-    let his_margins: Vec<f64> = buy_fills
-        .iter()
-        .filter_map(|(trade, _)| copy_margin(finite(&trade["his_price"])))
-        .collect();
-    let my_margins: Vec<f64> = buy_fills
-        .iter()
-        .filter_map(|(_, (_, _, price))| copy_margin(Some(*price)))
-        .collect();
+    // pondéré par les mises : parts totales / $ totaux − 1, ce que rapporterait l'ensemble si tout gagnait
+    let weighted = |pairs: Vec<(f64, f64)>| {
+        let (shares, usd) = pairs
+            .iter()
+            .fold((0.0, 0.0), |(s, u), (ps, pu)| (s + ps, u + pu));
+        (usd > 0.0)
+            .then(|| rounded((shares / usd - 1.0) * 100.0, 1))
+            .flatten()
+    };
+    let his_margin = weighted(
+        buy_fills
+            .iter()
+            // mêmes paris, mêmes mises (les miennes), à son prix : sinon ses grosses mises écrasent la comparaison
+            .filter_map(|(trade, (_, usd, _))| {
+                let price = finite(&trade["his_price"]).filter(|price| *price > 0.0)?;
+                Some((usd / price, *usd))
+            })
+            .collect(),
+    );
+    let my_margin = weighted(
+        buy_fills
+            .iter()
+            .map(|(_, (shares, usd, _))| (*shares, *usd))
+            .collect(),
+    );
     let average = |values: &[f64], decimals: usize| {
         if values.is_empty() {
             None
@@ -654,22 +676,20 @@ fn copy_summary(trades: &[&Value]) -> [Vec<Segment>; 2] {
     } else {
         None
     };
-    let his_margin = average(&his_margins, 1);
-    let my_margin = average(&my_margins, 1);
     let summary = vec![
-        text("moyenne  écart ", Tint::Gray),
+        text("moyenne écart ", Tint::Gray),
         text(
             display(average_difference, |value| format!("{value:+.3}")),
             sign_tint(average_difference),
         )
         .bold(),
-        text("  ·  mise ", Tint::Dim),
+        text(" · mise ", Tint::Dim),
         text(
             display(stake_ratio, |value| format!("{value:.1} %")),
             Tint::Plain,
         )
         .bold(),
-        text(" de la sienne  ·  marge ", Tint::Dim),
+        text(" de la sienne · gain si gagné ", Tint::Dim),
         text(
             display(his_margin, |value| format!("{value:.1} %")),
             Tint::Gray,
@@ -764,7 +784,9 @@ fn account_row(
     ])
 }
 
-fn slippage(label: &str, from: Option<f64>, to: Option<f64>) -> Vec<Segment> {
+/// Écart de PnL entre deux comptes, en $ et en % du capital de départ (`base`) : un % du PnL n'a pas de sens quand il
+/// est proche de zéro.
+fn slippage(label: &str, from: Option<f64>, to: Option<f64>, base: Option<f64>) -> Vec<Segment> {
     let mut result = vec![text(label, Tint::Gray)];
     match (from, to) {
         (Some(from), Some(to)) => {
@@ -774,13 +796,11 @@ fn slippage(label: &str, from: Option<f64>, to: Option<f64>) -> Vec<Segment> {
                 Some(delta) => result.push(text(format!("{delta:+.2}"), tint).bold()),
                 None => result.push(text("NULL", Tint::Dim)),
             }
-            let percentage = if from.abs() > f64::EPSILON {
-                rounded((to - from) / from.abs() * 100.0, 0)
-            } else {
-                None
-            };
+            let percentage = base
+                .filter(|base| *base > f64::EPSILON)
+                .and_then(|base| rounded((to - from) / base * 100.0, 1));
             match percentage {
-                Some(percentage) => result.push(text(format!(" ({percentage:+.0} %)"), tint)),
+                Some(percentage) => result.push(text(format!(" ({percentage:+.1} %)"), tint)),
                 None => result.push(text(" (NULL)", Tint::Dim)),
             }
         }
@@ -811,10 +831,15 @@ fn env_bool(key: &str) -> Option<bool> {
 }
 
 fn render(journal: &str, color: bool, now_ms: Option<u64>) -> String {
-    let rows: Vec<Value> = journal
+    let mut rows: Vec<Value> = journal
         .lines()
         .filter_map(|line| serde_json::from_str(line).ok())
         .collect();
+    // le run courant seulement : ses comptes repartent de zéro, les trades et la durée doivent faire de même
+    let runs = rows.iter().filter(|row| row["t"] == "start").count();
+    if let Some(last) = rows.iter().rposition(|row| row["t"] == "start") {
+        rows.drain(..last);
+    }
     let of = |kind: &'static str| rows.iter().filter(move |row| row["t"] == kind);
     let starts: Vec<&Value> = of("start").collect();
     let start = starts.last().copied();
@@ -851,7 +876,7 @@ fn render(journal: &str, color: bool, now_ms: Option<u64>) -> String {
     let run = start.and_then(|row| match &row["run"] {
         Value::Number(number) => number.as_u64().map(|number| format!("#{number}")),
         Value::String(value) => Some(format!("#{}", clean(value, 8))).filter(|value| value != "#"),
-        _ => Some(format!("#{}", starts.len())).filter(|_| !starts.is_empty()),
+        _ => Some(format!("#{runs}")).filter(|_| runs > 0),
     });
     let since = start.and_then(|row| row["at"].as_u64()).map(clock_text);
     let mode_tint = match mode.as_deref() {
@@ -885,12 +910,8 @@ fn render(journal: &str, color: bool, now_ms: Option<u64>) -> String {
 
     canvas.section("TRADES");
     let total = trades.len();
-    let skipped = count(&|trade| trade["decision"] == "skip");
-    let copied = count(&|trade| {
-        trade["decision"]
-            .as_str()
-            .is_some_and(|decision| decision != "skip")
-    });
+    let copied = count(&|trade| executed(trade));
+    let skipped = count(&|trade| !executed(trade) && trade["decision"].is_string());
     let unknown = total.saturating_sub(skipped + copied);
     let [copied_cells, skipped_cells, unknown_cells] =
         split_cells([copied, skipped, unknown], TRADE_BAR_W);
@@ -917,7 +938,10 @@ fn render(journal: &str, color: bool, now_ms: Option<u64>) -> String {
     canvas.row(trade_line);
 
     let mut reasons: BTreeMap<String, usize> = BTreeMap::new();
-    for trade in trades.iter().filter(|trade| trade["decision"] == "skip") {
+    for trade in trades
+        .iter()
+        .filter(|trade| !executed(trade) && trade["decision"].is_string())
+    {
         let reason = trade["reason"]
             .as_str()
             .map(|reason| clean(reason, MAX_REASON_CHARS))
@@ -1064,9 +1088,22 @@ fn render(journal: &str, color: bool, now_ms: Option<u64>) -> String {
         ));
     }
     let mut slippage_line = vec![text("glissement  ", Tint::Dim)];
-    slippage_line.extend(slippage("demandé → réel ", pnl_of("dem"), pnl_of("real")));
+    let capital = states
+        .last()
+        .and_then(|state| Some(finite(&state["real"]["value"])? - finite(&state["real"]["pnl"])?));
+    slippage_line.extend(slippage(
+        "demandé → réel ",
+        pnl_of("dem"),
+        pnl_of("real"),
+        capital,
+    ));
     slippage_line.push(text("  ·  ", Tint::Dim));
-    slippage_line.extend(slippage("observé → réel ", pnl_of("obs"), pnl_of("real")));
+    slippage_line.extend(slippage(
+        "observé → réel ",
+        pnl_of("obs"),
+        pnl_of("real"),
+        capital,
+    ));
     canvas.row(slippage_line);
 
     canvas.section("LATENCE (ms)");
@@ -1099,7 +1136,7 @@ fn render(journal: &str, color: bool, now_ms: Option<u64>) -> String {
         )
         .bold(),
         left("MISE (USD)", COPY_W[5] + COPY_W[6] + 3, Tint::Gray).bold(),
-        left("MARGE", COPY_W[7] + COPY_W[8] + 3, Tint::Gray).bold(),
+        left("GAIN SI GAGNÉ", COPY_W[7] + COPY_W[8] + 3, Tint::Gray).bold(),
     ]));
     canvas.row(join_cells(vec![
         left("Heure", COPY_W[0], Tint::Cyan).bold(),
@@ -1112,11 +1149,7 @@ fn render(journal: &str, color: bool, now_ms: Option<u64>) -> String {
         right("Lui", COPY_W[7], Tint::Cyan).bold(),
         right("Moi", COPY_W[8], Tint::Cyan).bold(),
     ]));
-    let copies: Vec<&Value> = trades
-        .iter()
-        .copied()
-        .filter(|trade| trade["decision"] == "buy" || trade["decision"] == "sell")
-        .collect();
+    let copies: Vec<&Value> = trades.iter().copied().filter(|t| executed(t)).collect();
     let mut recent: Vec<&Value> = copies.iter().rev().take(MAX_COPY_ROWS).copied().collect();
     recent.reverse();
     for trade in recent {
@@ -1272,7 +1305,7 @@ mod tests {
             "acquittés 1",
             "remplis 1",
             "  Observé      │     +2.00 │   +2.0 % │    102.00 │         0 │ ▁█",
-            "demandé → réel -1.10 (-110 %)",
+            "demandé → réel -1.10 (-1.1 %)",
             "  ordre suivi → observation │      700 │      800 │     3 │ ██",
             "  total src → fill",
             "verrou live ● non",
@@ -1367,7 +1400,7 @@ mod tests {
             "Heure    │ Sens │   Lui │   Moi │  Écart │     Lui │     Moi │      Lui │      Moi",
             "14:01:42 │ BUY  │ 0.520 │ 0.530 │ +0.010 │ 1250.00 │   25.00 │  +92.3 % │  +88.7 %",
             "14:26:40 │ BUY  │ 0.480 │  NULL │   NULL │  900.00 │    NULL │  +108.3% │     NULL",
-            "moyenne  écart +0.010  ·  mise 2.0 % de la sienne  ·  marge 92.3 % → 88.7 %",
+            "moyenne écart +0.010 · mise 2.0 % de la sienne · gain si gagné 92.3 % → 88.7 %",
             "2 copiés · 1 remplis · 1 NULL",
         ] {
             assert!(
@@ -1375,6 +1408,34 @@ mod tests {
                 "manque {expected:?} dans\n{output}"
             );
         }
+    }
+
+    #[test]
+    fn only_the_last_run_counts_and_unexecuted_sells_are_ignored() {
+        let journal = [
+            r#"{"t":"start","at":0,"mode":"paper"}"#,
+            r#"{"t":"trade","at":10,"decision":"buy","his_price":0.5,"his_usd":10.0,"fill_shares":2.0,"fill_usd":1.0}"#,
+            r#"{"t":"start","at":60000,"mode":"paper"}"#,
+            r#"{"t":"trade","at":61000,"decision":"sell","reason":"réel sous le minimum","his_price":0.2,"his_usd":5.0}"#,
+            r#"{"t":"trade","at":62000,"decision":"buy","his_price":0.5,"his_usd":10.0,"fill_shares":2.0,"fill_usd":1.0}"#,
+        ]
+        .join("\n");
+        let output = render(&journal, false, None);
+        assert_aligned(&output);
+        for expected in [
+            "vus 2",
+            "copiés 1",
+            "ignorés 1",
+            "réel sous le minimum ×1",
+            "run #2",
+            "1 copiés · 1 remplis · 0 NULL",
+        ] {
+            assert!(
+                output.contains(expected),
+                "manque {expected:?} dans\n{output}"
+            );
+        }
+        assert!(!output.contains("│ SELL"), "{output}");
     }
 
     #[test]

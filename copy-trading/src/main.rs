@@ -303,6 +303,12 @@ struct Bot {
     /// Tokens suivis sur le websocket market, et de quoi en ajouter.
     subscribed: HashSet<String>,
     market_cmd: tokio::sync::mpsc::UnboundedSender<Cmd>,
+    /// Relance du flux on-chain : publicnode peut couper l'abonnement aux logs sans couper les en-têtes de blocs
+    /// (vu le 2026-10-29 : 4 h 20 sans log, flux « Valid »).
+    chain_cmd: tokio::sync::mpsc::UnboundedSender<Cmd>,
+    last_resync_ms: u64,
+    /// Txs rattrapées par data-api : la chaîne ne doit plus les traiter si elle les livre en retard.
+    recovered: HashSet<String>,
     seen_logs: HashSet<(String, u64)>,
     /// Fills de la chaîne par tx : (token, achat, parts), pour le contrôle par data-api.
     by_tx: HashMap<String, (String, bool, f64)>,
@@ -548,6 +554,13 @@ impl Bot {
                     }
                 }
                 None if ts * 1000 + 10_000 < now => {
+                    // un fill manqué par la chaîne : l'abonnement aux logs est sans doute mort, on le refait (≤ 1/min)
+                    if now >= self.last_resync_ms + 60_000 {
+                        self.last_resync_ms = now;
+                        let _ = self.chain_cmd.send(Cmd::Resync);
+                        self.log(json!({ "t": "feed", "source": "chain", "health": "resync : fill manqué par la chaîne" }));
+                    }
+                    self.recovered.insert(tx.clone());
                     self.by_tx.insert(tx.clone(), (tok.clone(), buy, size));
                     self.checked.insert(tx.clone());
                     self.on_fill(
@@ -681,7 +694,7 @@ fn run(path: &str) {
         let his_pos: HashMap<String, f64> = adapter_polymarket::account::holdings(&cfg.wallet, T, 40).await.unwrap_or_default()
             .into_iter().map(|h| (h.token, h.shares as f64 / 1e6)).collect();
         let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (_cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (chain_cmd, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
         tokio::spawn(feed::run_with(Box::new(chain::Logs { url: cfg.rpc_ws.clone(), wallet: cfg.wallet.clone() }), 0, 0, vec![], clock.clone(), cmd_rx, out_tx.clone(), true));
         // source 1 : les trades publics des tokens qu'il détient (heure du match) ; un marché calme peut se taire 30 s
         let subscribed: HashSet<String> = his_pos.iter().filter(|(_, s)| **s > 0.0).map(|(t, _)| t.clone()).collect();
@@ -689,7 +702,7 @@ fn run(path: &str) {
         tokio::spawn(feed::run_tuned(Box::new(Market), 1, 0, subscribed.iter().cloned().collect(), clock.clone(), market_rx, out_tx, false, Timing::default(), Duration::from_secs(30), Some(Duration::from_secs(10))));
         let mut bot = Bot {
             his_value: 0.0, his_pos, obs: Account::new(real_cash), dem: Account::new(real_cash), real: Account::new(real_cash),
-            marks: BTreeMap::new(), market_of: HashMap::new(), matched: HashMap::new(), subscribed, market_cmd, seen_logs: HashSet::new(), by_tx: HashMap::new(), checked: HashSet::new(), entered: HashSet::new(),
+            marks: BTreeMap::new(), market_of: HashMap::new(), matched: HashMap::new(), subscribed, market_cmd, chain_cmd, last_resync_ms: 0, recovered: HashSet::new(), seen_logs: HashSet::new(), by_tx: HashMap::new(), checked: HashSet::new(), entered: HashSet::new(),
             start_ms, live, journal, clock: clock.clone(), cfg,
         };
         bot.minute().await;
@@ -703,7 +716,7 @@ fn run(path: &str) {
             tokio::select! {
                 m = out_rx.recv() => match m {
                     Some(Out::Frame { at, text, .. }) => if let chain::Frame::Fill(f) = chain::read(&text) {
-                        if !bot.seen_logs.insert((f.tx.clone(), f.log_index)) { continue; }
+                        if bot.recovered.contains(&f.tx) || !bot.seen_logs.insert((f.tx.clone(), f.log_index)) { continue; }
                         let e = bot.by_tx.entry(f.tx.clone()).or_insert((f.token.clone(), f.buy, 0.0));
                         e.2 += f.shares;
                         bot.on_fill(f, "chain", at.wall_ns / 1_000_000).await;

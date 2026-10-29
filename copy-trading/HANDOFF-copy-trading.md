@@ -18,11 +18,13 @@
 - Barème E (config `tiers`) : p < 0,001 % rien | ≥ 0,001 % 3 % | ≥ 0,1 % 5 % | ≥ 1 % 10 %, relevé au minimum d'ordre ; UNE entrée par token. Capital de test 20 $.
 - Serveur : dublin-dry-run `ubuntu@54.76.142.4`, `~/.ssh/dublin-dry-run.pem`, aarch64. Cross arm64 installé dans WSL (rustup target + gcc-aarch64).
 
+- 2026-10-29 soir, analyse du paper 100 $ (11 h 29, 473 trades) : flux on-chain muet de 12:09 à 16:27 alors que « Valid » (abonnement logs perdu par publicnode, en-têtes de blocs OK) → 145 trades rattrapés par data-api à ~24 s. Corrigé : `Cmd::Resync` du flux chaîne dès qu'un fill est rattrapé (≤ 1/min, ligne `feed` « resync ») + anti-doublon (`recovered`). Rapport corrigé : run courant seulement ; « copiés » = exécutés (vente sous le minimum → ignorés) ; glissement en % du capital ; « MARGE » → « GAIN SI GAGNÉ », pondéré par mes mises. 23 tests verts. NON déployé.
+
 **Reste à faire**
-1. À la prochaine demande de bilan, livrer `bash copy-trading/deploy/report` ; ce rapport couvre tout le journal du serveur.
-2. Livrer aussi la sortie du paper barème E (`ssh … 'cd ~/ct-paper && ./copy-trading report journal.jsonl'`).
+1. Accord utilisateur pour redéployer (`bash copy-trading/deploy/start --mode paper`) : redémarre le paper (nouveau run, comptes à 100 $).
+2. Après déploiement : vérifier dans le journal qu'aucune longue série `src: data-api` ne réapparaît, ou qu'elle est suivie d'une ligne `feed … resync`.
 3. Accord utilisateur pour commiter (uniquement copy-trading/ + les 4 fichiers engine, `git commit -- <chemins>`).
-4. Optionnel (accord requis) : signature neg-risk dans sign.rs (marchés neg-risk ignorés en live) ; nettoyer `~/ct-paper/` sur le serveur.
+4. Optionnel (accord requis) : signature neg-risk dans sign.rs ; nettoyer `~/ct-paper/` sur le serveur.
 
 **Décisions et pièges**
 - Réseau local : filtre TLS sur les RPC Polygon → tout test réel se fait sur Dublin.
@@ -30,6 +32,8 @@
 - Polymarket donne des identifiants API à toute clé (derive-api-key) : un live avec une clé quelconque s'arme ; seul le solde (0 $) empêche les ordres.
 - sh non interactif donne /dev/null au process en arrière-plan : `exec 3<&0` puis `<&3` (deploy/start).
 - systemd crée run.log en root : start le rend à copyt.
+- Le wallet suivi est un teneur de marché : il achète au bid (ordres au repos remplis par morceaux, d'où les « renforts »), je copie en preneur au ask → 1 tick perdu par copie, structurel (observé +1,08 $ vs réel −0,95 $ sur le run du 29). Pas un bug.
+- Ses marchés sont longs (élections 3 nov. 2026, NBA 2027) : aucune résolution avant plusieurs jours.
 
 **Fichiers clés**
 - `copy-trading/src/main.rs` : run/encrypt/report, boucle, ordres live. `src/{chain,book,sizing,pnl,report}.rs`.
@@ -39,4 +43,4 @@
 **Commandes utiles**
 - Tests : WSL `CARGO_TARGET_DIR=$HOME/ct-target cargo test --release` dans copy-trading/ ; `bash copy-trading/deploy/{start,stop,report}`.
 
-**Prochaine action** : lire la sortie du paper barème E (tâche de fond ou commande ci-dessus) et la livrer ; puis demander l'accord de commit.
+**Prochaine action** : demander l'accord de redéploiement du binaire corrigé (étape 1), puis l'accord de commit.
