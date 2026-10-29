@@ -109,7 +109,35 @@ Tableau de bord du journal serveur (`/var/lib/copy-trading/journal.jsonl`) : cad
 - état du service, run paper/live, verrou live, dernier trade et arrêt de sécurité éventuel.
 
 Un compteur mesuré à zéro s'affiche `0` ; une donnée absente ou pas encore mesurée s'affiche `NULL`, jamais comme un faux zéro.
-Le journal s'allonge d'un run à l'autre : les statistiques couvrent tout le journal. L'état du service et le verrou live sont lus en direct sur le serveur.
+Le journal s'allonge d'un run à l'autre : le rapport ne compte que le dernier run (ses comptes repartent de zéro). L'état du service et le verrou live sont lus en direct sur le serveur.
+
+## UI temps réel (sur le PC)
+
+```
+python copy-trading/ui/serve.py                                                 # journal du service
+python copy-trading/ui/serve.py --journal /home/ubuntu/ct-maker/journal.jsonl --no-sudo --port 8767   # un run de test
+python copy-trading/ui/serve.py --file journal.jsonl                            # un journal local, sans ssh
+```
+
+Puis ouvrir http://127.0.0.1:8765/ (ou le port choisi). Python 3 seul, aucune dépendance. Le serveur lit `deploy/.env` (`COPY_SSH_DEST`, `COPY_SSH_KEY`, `COPY_WALLET`), suit le journal par `ssh … tail -F` et relaie avec un cache les API publiques de Polymarket. Il n'écoute que sur 127.0.0.1. L'UI est en lecture seule : elle ne parle jamais au bot, et sur le serveur seule tourne la commande `tail`. Si ssh coupe, il se reconnecte seul et la page se recharge à partir du journal complet.
+
+- **Bandeau** : wallet suivi, mode, stratégie, santé des flux chaîne / market, contrôles, période (1H, 6H, 1J, Run).
+- **Comparaison** : performance lui / moi (écart grisé), rendement, délai de copie, prix d'entrée, exécution.
+- **Marché sélectionné** : prix, ses fills (orange, taille selon le montant), mes ordres posés (bleu : plein si rempli, pointillé en file, × si annulé), file devant mes ordres.
+- **Cascade des décalages** : un trade de lui par ligne ; son match → ma détection (orange, rouge si secours API) → mon ordre → mon fill (bleu), échelle log de 0 à 6 h.
+- **Droite** : nos deux positions, carnet avec son niveau (Lui) et le mien (Moi), ma place dans la file et l'heure d'annulation automatique.
+- **Liens** : survoler une ligne allume son marché dans la liste et son point dans le graphique ; cliquer un marché (liste, cascade, graphique) le sélectionne partout ; « Suivre le direct » revient au dernier marché actif ; ↑/↓ dans la liste.
+
+## Stratégies (`strategy` dans la config)
+
+| Clé | Valeurs | Défaut |
+| --- | --- | --- |
+| `exec` | `maker` : je pose un ordre limite à son prix · `taker` : je prends le carnet (FAK) | `maker` |
+| `buy` | `cumulative` : mon engagement suit son cumul sur le token (barème) · `first_fill` : une entrée, sur son 1er remplissage | `cumulative` |
+| `sell` | `lots` : sa fraction vendue, par lots vendables, au moins un lot en gain · `all` : toute ma position à son prix | `lots` |
+| `cancel_after_min` | annulation de mon ordre posé s'il n'a plus rempli à ce prix depuis ce délai | `360` |
+
+Ses ordres ouverts ne sont pas publics : ils sont déduits de ses remplissages. Une annulation de mon côté démentie par un fill de lui au même prix est tracée (`stat` « annulation à tort »).
 
 ## Fichiers sur le serveur
 

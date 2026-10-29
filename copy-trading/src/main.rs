@@ -1077,7 +1077,8 @@ fn run(path: &str) {
             his_kept: HashMap::new(), bought: HashMap::new(), sold: HashMap::new(), applied: HashSet::new(), side_checks: 0, cfg,
         };
         bot.minute().await;
-        let line = json!({ "t": "start", "mode": bot.cfg.mode, "wallet": bot.cfg.wallet, "tiers": bot.cfg.tiers, "cash": real_cash, "his_value": bot.his_value, "his_positions": bot.his_pos.len() });
+        let line = json!({ "t": "start", "mode": bot.cfg.mode, "wallet": bot.cfg.wallet, "tiers": bot.cfg.tiers, "cash": real_cash, "his_value": bot.his_value, "his_positions": bot.his_pos.len(),
+            "strategy": { "exec": bot.cfg.strategy.exec, "buy": bot.cfg.strategy.buy, "sell": bot.cfg.strategy.sell, "cancel_after_min": bot.cfg.strategy.cancel_after_min } });
         bot.log(line);
         let mut poll = tokio::time::interval(Duration::from_secs(5));
         let mut minute = tokio::time::interval(Duration::from_secs(60));

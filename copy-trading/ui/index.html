@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Copy-trading</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3Crect width='28' height='28' rx='7' fill='%233262FF'/%3E%3Cpath d='M7 18 L12 12 L16 15 L21 9' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='21' cy='9' r='2' fill='%23FF9900'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="nav" id="nav"></header>
+<section class="top">
+  <div class="p" id="perf"></div>
+  <div class="p vs" id="t-ret"></div>
+  <div class="p vs" id="t-delay"></div>
+  <div class="p vs" id="t-price"></div>
+  <div class="p vs" id="t-exec"></div>
+</section>
+<main class="main">
+  <aside class="p list" aria-label="Marchés">
+    <div class="hd"><h2>Marchés</h2><span class="sub" id="mk-count"></span><div class="lg"><span><i style="background:var(--him)"></i>sa part</span><span><i style="background:var(--me)"></i>ma part</span></div></div>
+    <div class="fl" id="filters" role="group" aria-label="Filtrer les marchés"></div>
+    <div class="rows" id="rows" role="listbox" aria-label="Marchés suivis" tabindex="0"></div>
+  </aside>
+  <section class="p center" aria-label="Marché sélectionné et décalages">
+    <div id="mhead"></div>
+    <div id="mchart"></div>
+    <div class="wf">
+      <div class="wr wh" id="whead"></div>
+      <div class="wbody" id="wbody"></div>
+    </div>
+  </section>
+  <aside class="side" aria-label="Détail du marché">
+    <div class="p cmp" id="cmp"></div>
+    <div class="p bk" id="book"></div>
+  </aside>
+</main>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
