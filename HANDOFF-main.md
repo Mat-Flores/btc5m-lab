@@ -17,7 +17,8 @@
 2. `pull` quotidien (≈ 4 Go/jour, 25 Go libres sur le serveur).
 3. Idée non décidée : PnL des fenêtres « choc » avec/sans `no_knife`, `max_diverge`, `max_imbalance`, `Move`, puis éventuelle pause sur calendrier macro, validée en walk-forward + Monte Carlo.
 
-FAIT aussi le 28/10 (4e demande) : engine suit le tick du marché (`follow_tick`, plus de refus à 0,001) ; `cancel_ahead_factor` 0,5 par défaut, non-régression via `config/nonreg.json` (0 écart revérifié) ; `convert-report.json` et `deploy/` vide supprimés.
+FAIT aussi le 28/10 : engine suit le tick du marché (`follow_tick`) ; traceur redéployé (900 s) ; convert-report et deploy/ vide supprimés.
+FAIT le 29/10 (limites) : note d'unification papier/TraceVenue en tête de `engine/app/src/paper.rs` (à faire quand une stratégie maker passera en papier) ; `last_trade_price` validé contre data-api (`backtest/scripts/ltp-check.mjs` : 99,5 % des tx, niveaux 90/92 %) + crédit au niveau miroir ; TP/SL mesuré (G2-C 961,55 vs 950,86 $, G4-E ruiné des deux côtés) après correction du refus de vente au-delà du solde ; arcsine copié (`backtest/data/wallets/`, gitignoré) et `validate --maker` à 0 écart avec l'oracle ; `cancel_ahead_factor` revenu à 1 (arcsine contredit 0,5).
 
 ## Décisions et pièges
 - `copy-trading/` : projet isolé de l'utilisateur, ne jamais le lire ni le commiter ; commiter avec `git commit -- <chemins>` (l'utilisateur stage lui-même). Exclu de graphify (`graphify-out/.graphify_build.json`).
