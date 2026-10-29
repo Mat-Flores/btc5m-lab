@@ -45,27 +45,67 @@ pub fn to_fixed(x: f64, p: usize) -> String {
 /// `String(x)` of a JavaScript number, for the values validate.mjs prints that way (ms, finite, < 1e21).
 fn js_str(x: f64) -> String { if x == 0.0 { "0".into() } else { format!("{x}") } }
 
-/// `twins(start, { delay })`: None when the window has no on-chain orders or no full fills.
-pub fn twins(src: &Source, start: u64, book: &[f32], delay: f64) -> Option<(Vec<Twin>, usize)> {
+/// `--maker` of validate.mjs: one wallet's orders (arcsine's have no creation time), its matches from its calldata
+/// (`wallet-calldata.mjs`), each order named by its on-chain hash (`wallet-orders.mjs`), per window start.
+pub struct Wallet { pub maker: String, pub by_win: HashMap<u64, Vec<Value>> }
+
+/// validate.mjs:90-101: the wallet's files `<maker>.orders.jsonl` and `<maker>.calldata.jsonl` in `dir`.
+pub fn wallet(src: &Source, dir: &std::path::Path, maker: &str) -> Result<Wallet, String> {
+    const EX: &str = "0xe111180000d2663c0091e4f400237545b87b996b";
+    let maker = maker.to_lowercase();
+    let read = |n: &str| -> Result<Vec<Value>, String> {
+        let p = dir.join(format!("{maker}.{n}.jsonl"));
+        let t = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+        Ok(t.split('\n').filter(|l| !l.is_empty()).filter_map(|l| serde_json::from_str(l).ok()).collect())
+    };
+    let mut hash: HashMap<String, Vec<Value>> = HashMap::new();
+    for r in read("orders")? { if r["taker"].as_str() != Some(EX) { hash.entry(r["tx"].as_str().unwrap_or("").to_string()).or_default().push(r); } }
+    let mut win: HashMap<String, u64> = HashMap::new();
+    let wd = src.data.join("polymarket").join("windows");
+    for f in std::fs::read_dir(&wd).map_err(|e| format!("{}: {e}", wd.display()))?.flatten() {
+        if !f.file_name().to_string_lossy().starts_with("btc-updown-5m-") { continue; }
+        let w = read_json(&f.path())?;
+        let Some(st) = num(&w["start"]) else { continue };
+        for t in w["tokens"].as_array().map_or(&[][..], |v| v.as_slice()) { if let Some(t) = t.as_str() { win.insert(t.to_string(), st as u64); } }
+    }
+    let mut by_win: HashMap<u64, Vec<Value>> = HashMap::new();
+    for mut m in read("calldata")? {
+        let tx = m["tx"].as_str().unwrap_or("").to_string();
+        if let Some(xs) = m["makers"].as_array_mut() {
+            for x in xs.iter_mut() {
+                let (token, filled) = (x["token"].clone(), num(&x["filled"]).unwrap_or(f64::NAN));
+                let h = hash.get(&tx).and_then(|rs| rs.iter().find(|r| r["token"] == token && (num(&r["shares"]).unwrap_or(f64::NAN) - filled).abs() < 0.011)).and_then(|r| r["order"].as_str());
+                if let Some(h) = h { x["hash"] = Value::String(h.to_string()); }
+            }
+        }
+        if let Some(&st) = m["makers"][0]["token"].as_str().and_then(|t| win.get(t)) { by_win.entry(st).or_default().push(m); }
+    }
+    Ok(Wallet { maker, by_win })
+}
+
+/// `twins(start, { delay, maker, arrivals, matches })`: None when the window has no on-chain orders (or no matches of
+/// the wallet) or no full fills.
+pub fn twins(src: &Source, start: u64, book: &[f32], delay: f64, wallet: Option<&Wallet>) -> Option<(Vec<Twin>, usize)> {
     let win = src.window_json(start)?;
-    let cid = win["conditionId"].as_str()?;
-    let of = src.data.join("polymarket").join("orders").join(format!("{cid}.json"));
+    let of = src.data.join("polymarket").join("orders").join(format!("{}.json", win["conditionId"].as_str().unwrap_or("undefined")));
     let (mut fills, _) = load_fills(src, start)?;
-    if !of.exists() { return None; }
+    let matches = match wallet {
+        Some(w) => Value::Array(w.by_win.get(&start)?.clone()),
+        None => { if !of.exists() { return None; } read_json(&of).ok()? }
+    };
     let (ev, n, o0) = (book, book.len() / COLS, start as f64 * 1000.0);
     let vol = label_trades(ev, start, &mut fills, 0.0);
     let book_ts: HashMap<&str, f64> = fills.iter().filter_map(|x| x.book_ts.filter(|&t| t != 0.0).map(|t| (x.tx.as_str(), t))).collect();
     // orders and their real fills, in first-seen order (a JS Map)
-    let matches = read_json(&of).ok()?;
     let mut keys: HashMap<String, usize> = HashMap::new();
     let mut orders: Vec<(Value, Vec<(f64, f64)>)> = vec![];
     for m in matches.as_array()? {
         let Some(&t) = m["tx"].as_str().and_then(|tx| book_ts.get(tx)) else { continue };
         for x in m["makers"].as_array().map_or(&[][..], |v| v.as_slice()) {
-            if !num(&x["ts"]).is_some_and(|ts| ts > 0.0) { continue; }
+            match wallet { Some(w) => if x["maker"].as_str() != Some(w.maker.as_str()) { continue }, None => if !num(&x["ts"]).is_some_and(|ts| ts > 0.0) { continue } }
             let k = match x["hash"].as_str() {
                 Some(h) => h.to_string(),
-                None => format!("{}|{}|{}|{:x}|{:.4}|{:x}", x["maker"], x["token"], x["side"], num(&x["size"]).unwrap_or(f64::NAN).to_bits(), num(&x["price"]).unwrap_or(f64::NAN), num(&x["ts"]).unwrap().to_bits()),
+                None => format!("{}|{}|{}|{:x}|{:.4}|{:x}", x["maker"], x["token"], x["side"], num(&x["size"]).unwrap_or(f64::NAN).to_bits(), num(&x["price"]).unwrap_or(f64::NAN), num(&x["ts"]).unwrap_or(f64::NAN).to_bits()),
             };
             let i = *keys.entry(k).or_insert_with(|| { orders.push((x.clone(), vec![])); orders.len() - 1 });
             orders[i].1.push((t, num(&x["filled"]).unwrap_or(f64::NAN)));
@@ -96,10 +136,17 @@ pub fn twins(src: &Source, start: u64, book: &[f32], delay: f64) -> Option<(Vec<
         let q = if side == 0.0 { p } else { 1000.0 - p };
         let (typ, i) = if s == 0 { (1.0, q) } else { (2.0, 1000.0 - q) };
         let recs = lv.get(&((typ * 1001.0 + i) as usize)).map_or(&[][..], |v| v.as_slice());
-        let ts = num(&x["ts"]).unwrap();
-        let created = if ts < 1e12 { ts * 1000.0 } else { ts };
         let first_real = real.iter().fold(f64::INFINITY, |a, r| a.min(r.0));
-        let Some(a) = recs.iter().find(|r| !r.4 && r.1 >= created - 1000.0 && r.1 <= first_real && (r.3 - r.2 - size).abs() < 0.011) else { missing += 1; continue };
+        // the wallet's orders have no creation time: the last increase of exactly their size before the first fill
+        let a = match wallet {
+            Some(_) => recs.iter().rev().find(|r| !r.4 && r.1 <= first_real && r.1 >= first_real - 300e3 && (r.3 - r.2 - size).abs() < 0.011),
+            None => {
+                let ts = num(&x["ts"]).unwrap_or(f64::NAN);
+                let created = if ts < 1e12 { ts * 1000.0 } else { ts };
+                recs.iter().find(|r| !r.4 && r.1 >= created - 1000.0 && r.1 <= first_real && (r.3 - r.2 - size).abs() < 0.011)
+            }
+        };
+        let Some(a) = a else { missing += 1; continue };
         let real_sh = real.iter().fold(0.0, |t, r| t + r.1);
         let last_real = real.iter().fold(f64::NEG_INFINITY, |a, r| a.max(r.0));
         let mut end = f64::INFINITY;
@@ -143,18 +190,22 @@ pub struct Report { pub lines: Vec<String> }
 
 /// The whole of `validate.mjs --delay <delay s> --sim exact`. `only`: restrict to these windows. `export`: one line
 /// per twin of the simulator part (same fields as backtest/oracle/validate-export.mjs).
-pub fn run(src: &Source, wins: &[Win], base: &Params, cfg: &VenueCfg, delay_s: f64, only: Option<&[u64]>, mut export: Option<&mut dyn Write>) -> Result<Report, String> {
+pub fn run(src: &Source, wins: &[Win], base: &Params, cfg: &VenueCfg, delay_s: f64, only: Option<&[u64]>, wallet: Option<&Wallet>, mut export: Option<&mut dyn Write>) -> Result<Report, String> {
     let delay = delay_s; // validate.mjs passes `--delay` (s) to twins as is, compared with ms stamps
     let mut all: Vec<Twin> = vec![];
     let mut n_all = 0usize;
     let b = src.load_b()?;
-    let mut books: HashMap<u64, crate::packs::Pack> = HashMap::new();
     for &(start, _) in &b {
         if only.is_some_and(|o| !o.contains(&start)) { continue; }
-        let Some(w) = src.window_json(start) else { continue };
-        if w["conditionId"].as_str().is_none_or(|c| !src.data.join("polymarket").join("orders").join(format!("{c}.json")).exists()) { continue; }
+        match wallet {
+            Some(w) => if !w.by_win.contains_key(&start) { continue },
+            None => {
+                let Some(w) = src.window_json(start) else { continue };
+                if w["conditionId"].as_str().is_none_or(|c| !src.data.join("polymarket").join("orders").join(format!("{c}.json")).exists()) { continue; }
+            }
+        }
         let pack = src.read_b(start)?;
-        if let Some((t, missing)) = twins(src, start, &pack.book, delay) { n_all += t.len() + missing; all.extend(t); books.insert(start, pack); }
+        if let Some((t, missing)) = twins(src, start, &pack.book, delay, wallet) { n_all += t.len() + missing; all.extend(t); }
     }
     let ok = &all;
     let mut lines = vec![];
@@ -176,9 +227,12 @@ pub fn run(src: &Source, wins: &[Win], base: &Params, cfg: &VenueCfg, delay_s: f
     let (mut pred, mut exact, mut pnl, mut real, mut real_pnl) = (0.0, 0usize, 0.0, 0.0, 0.0);
     let mut days: Vec<(String, f64, f64)> = vec![];
     let mut labels: HashMap<u64, Option<Vec<f32>>> = HashMap::new();
+    // one window's pack at a time, read again when the window changes (validate.mjs `cache`): all of them do not fit
+    let mut cur: Option<(u64, crate::packs::Pack)> = None;
     for x in &tw {
         let w = w_by[&x.start];
-        let d = &books[&x.start];
+        if cur.as_ref().is_none_or(|c| c.0 != x.start) { cur = Some((x.start, src.read_b(x.start)?)); }
+        let d = &cur.as_ref().unwrap().1;
         if !labels.contains_key(&x.start) { labels.clear(); labels.insert(x.start, crate::labels::labels(src, x.start, &d.book)); }
         let pay = (if w.winner == x.s as i64 { 1.0 } else { 0.0 }) - x.q / 1000.0;
         real += x.real_sh;

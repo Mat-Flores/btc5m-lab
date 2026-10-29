@@ -1,0 +1,24 @@
+[package]
+name = "copy-trading"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Paquet autonome (hors workspace de l'engine) : il réutilise l'engine par chemins, comme source-tracing.
+[workspace]
+
+[[bin]]
+name = "copy-trading"
+path = "src/main.rs"
+
+[dependencies]
+engine-core = { path = "../engine/core" }
+engine-app = { path = "../engine/app" }
+adapter-polymarket = { path = "../engine/adapters/polymarket" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "time", "sync", "macros", "signal"] }
+
+[profile.release]
+codegen-units = 1
+lto = true

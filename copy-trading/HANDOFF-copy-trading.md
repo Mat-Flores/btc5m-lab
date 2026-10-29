@@ -1,34 +1,41 @@
 # HANDOFF — copy-trading
 
-**Branche** : `main` (chantier isolé dans `copy-trading/`, spec de référence : `copy-trading/SPEC.md`, ne pas la modifier).
+**Branche** : `main` (chantier dans `copy-trading/` ; spec de référence `copy-trading/SPEC.md`, immuable). Une autre session travaille en parallèle sur main (backtest/, docs/, engine/app/src/engine.rs) : ne jamais toucher ni commiter ses fichiers.
 
 **Objectif** : outil Rust autonome qui suit un wallet public Polymarket et recopie ses trades au plus vite, mises proportionnelles, modes paper/live, 3 comptes de PnL, latences par segment.
 
 **Fait**
-- Étape 1 : code réutilisable lu, sources mesurées (10 min, 2026-10-28 ~21h30), plan livré. EN ATTENTE DE L'ACCORD de l'utilisateur.
-- Wallet à suivre (donné par l'utilisateur) : `0xf0318c32136c2db7fec88b84869aee6a1106c80c`, à rendre modifiable depuis `deploy/.env`.
+- Étape 1 : sources mesurées. Logs OrderFilled on-chain = source principale (1,77 s médiane après le match, mesuré depuis Dublin ; avant RTDS dans 96 % des cas ; 28/28 trades du wallet). Secours : data-api /activity (19 s). Tx en attente via RPC testée : 1,43 s, gain ~0,5 s seulement, écartée.
+- Étape 2 : code + tests ✅ — 14 tests copy-trading verts, tests engine tous verts (dont encrypt→decrypt_v1 qui refait le fixture à l'octet). Aucune crate nouvelle (lock = celui de source-tracing).
+- Hors copy-trading (accord utilisateur) : `engine/core/src/key.rs` + `encrypt_v1` ; `engine/app/src/arm.rs` (arm/wallet_line déplacés depuis live.rs, ré-exportés) ; `engine/app/src/lib.rs` + `pub mod arm`.
 
-**Mesures (étape 1)** — horloge Windows corrigée de +1,50 s (w32tm vs time.windows.com)
-- Logs OrderFilled on-chain (WS publicnode, topic0 `0xd543adfd…`) : arrivent avant RTDS dans 96 % des cas, 580 ms d'avance en médiane (p10 973 ms, p90 155 ms ; n = 12 509 tx). Couvrent le wallet cible 28/28 (topic maker).
-- RTDS `activity/trades` : 257 ms en médiane après son propre `timestamp` ; wallet cible vu seulement 14/28 fois (un seul côté par tx).
-- data-api `/activity?user=` (sondage 1 s) : 19 s de retard en médiane (p90 32 s) → source de secours. `/trades` global : ~280 s, inutilisable.
-- Timestamp de bloc : résolution 1 s, parfois après notre réception → segment « ordre suivi → observation » peu fiable sous la seconde.
+**Décisions utilisateur (2026-10-28)**
+- Wallet suivi `0xf0318c32136c2db7fec88b84869aee6a1106c80c`, modifiable via `COPY_WALLET` dans deploy/.env (start l'écrit dans config.json).
+- Règle de mise remplacée : m = min(100 %, K × p), K = 100, capital de test 20 $. Ce wallet vaut ~5,45 M$ (2,63 M$ pUSD + 2,82 M$ positions) : il doit miser ≳ 5 450 $ pour 20 % de mes 20 $.
+- Serveur de test : `dublin-dry-run` = `ubuntu@54.76.142.4`, clé `~/.ssh/dublin-dry-run.pem`, Ubuntu 24.04 **aarch64**, 2 vCPU, 1,8 Go, vide (aucun service). À traiter comme définitif.
 
 **Reste à faire**
-1. Accord sur le plan + réponses aux questions ouvertes (taille p minuscule, arm() dans main.rs, deps directes, .env).
-2. Étape 2 : code + tests. Vérifier d'abord la disposition des données d'OrderFilled V2 (non décodée : 2 échecs TLS du RPC depuis Windows).
-3. Étape 3 : paper ≥ 30 min. 4. Étape 4 : deploy + COMMANDES.md → stop.
+1. Étape 3 : paper ≥ 30 min en WSL → sortie de `report`.
+2. Étape 4 : deploy/{start,stop,report} + COMMANDES.md. Le binaire doit être arm64 : WSL n'a ni target aarch64 ni gcc-aarch64 → demander l'accord (outil nouveau) ou compiler sur le serveur.
+3. `graphify update .` à la fin.
 
 **Décisions et pièges**
-- curl Windows (schannel) échoue en TLS → utiliser node fetch ou WSL.
-- `engine/app/src/live.rs` est un module du binaire (main.rs), pas de la lib : `arm`/`wallet_line` non importables.
-- Le flux RTDS peut passer par `engine_core::feed::run_with(trace=true)` (trames brutes), sans toucher engine/.
+- Réseau local : filtre TLS intermittent sur les RPC Polygon (curl Windows/WSL, node) ; data-api et CLOB passent. Mesures on-chain fiables seulement depuis Dublin.
+- Python urllib → 403 Cloudflare sans User-Agent.
+- wsl.exe casse les `$var` passées en ligne : toujours passer par un script.
+- /book : niveaux du pire au meilleur (on trie). Achat log : data[2] = USDC, data[3] = parts ; vente : inversé `[non vérifié réel, contrôlé par les lignes check]`.
+- Live : neg-risk (échange 0xe2222d…) non signé par sign.rs → ordre ignoré en live (journal) ; étendre Signer demande accord.
+- Live : verrou `<journal>.live-lock` ; présent au démarrage → halt journalisé, pas de reprise seule.
 
 **Fichiers clés**
-- `copy-trading/SPEC.md` : spécification, immuable.
-- Scripts de mesure : dans le scratchpad de session (non versionnés) : measure.mjs, analyze.mjs.
+- `copy-trading/src/main.rs` : run/encrypt/report, boucle, ordres live, valeur du wallet suivi.
+- `copy-trading/src/{chain,book,sizing,pnl,report}.rs` : détection, carnet, mise, 3 comptes, synthèse.
+- `copy-trading/config.example.json` : config (K, 20 $, slippage 10 %, RPC).
 
 **Commandes utiles**
-- cargo uniquement dans WSL Ubuntu-24.04, `CARGO_TARGET_DIR=$HOME/ct-target`.
+- Tests : script WSL `CARGO_TARGET_DIR=$HOME/ct-target cargo test --release` dans copy-trading/ (et engine/ `--workspace`).
 
-**Prochaine action** : attendre l'accord de l'utilisateur sur le plan d'étape 1 (voir la conversation), puis commencer l'étape 2 par le décodage d'un log OrderFilled V2 du wallet cible.
+**Étape 3 (2026-10-28 22:38–23:13 UTC+1, sur dublin-dry-run car le réseau local bloque Polygon)** : 88 fills vus (tous par la chaîne), 88/88 concordants avec data-api (achats ET ventes : décodage vente vérifié), 1 copié (achat 122 493 $ du wallet, p = 2,24 % → 20 $ à 0,53, 37,74 parts sur carnet réel), puis cash à 0 → 85 « sous le minimum ». PnL obs −2,12 / dem −2,45 / réel −2,45 $. Observation → décision 34 ms médiane. Binaire arm64 + journal dans `~/ct-paper/` sur le serveur (process terminé).
+- PROBLÈME : « ordre suivi → observation » = −1 038 ms médiane : l'horodatage de bloc Polygon est postérieur à notre réception (déjà vu à l'étape 1) → il ne date pas l'ordre. 25/88 trades sans bloc connu. Proposé : dater par le match CLOB (websocket market, `last_trade_price.timestamp` ms + transaction_hash, mesuré 9 ms après le match).
+
+**Prochaine action** : réponse de l'utilisateur sur l'horodatage source (match CLOB via websocket market, ou garder le bloc), puis étape 4 : deploy/{start,stop,report} + COMMANDES.md (build : `deploy/build-wsl.sh`, cross arm64 installé).

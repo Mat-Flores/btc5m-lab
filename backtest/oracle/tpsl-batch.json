@@ -1,0 +1,67 @@
+{
+ "name": "tpsl-g2c-g4e",
+ "note": "Mesure D6 : sorties preneuses TP/SL, exchange realiste (fill a l arrivee, Rust) contre ancien simulateur (fill a la decision, Node). Candidats G2-C et G4-E des finalistes du 22/10 (results/G2, results/G4).",
+ "base": {},
+ "candidates": [
+  {
+   "id": "G2-C",
+   "desc": "Take profit + stop loss preneurs",
+   "f": 0.02,
+   "shares": null,
+   "prob": "fair",
+   "sigmaMult": 1.5,
+   "price": {
+    "mode": "offset",
+    "offset": 0.03,
+    "fixed": 0.45
+   },
+   "requote": "follow",
+   "pull": null,
+   "cancelLoser": {
+    "X": 120,
+    "Y": 0.8
+   },
+   "tp": 0.1,
+   "sl": 0.2,
+   "exitSlip": 0.05,
+   "mergeHold": true,
+   "entryFrom": 10,
+   "quoteEnd": 10,
+   "volMin": 0,
+   "volMax": 3.65,
+   "minPrevVolume": 0,
+   "dailyStop": 0.05,
+   "liqCap": true
+  },
+  {
+   "id": "G4-E",
+   "desc": "Take profit preneur, sans stop",
+   "f": 0.1,
+   "shares": null,
+   "prob": "fair",
+   "sigmaMult": 1.5,
+   "price": {
+    "mode": "offset",
+    "offset": 0.03,
+    "fixed": 0.45
+   },
+   "requote": "follow",
+   "pull": null,
+   "cancelLoser": {
+    "X": 15,
+    "Y": 0.95
+   },
+   "tp": 0.1,
+   "sl": null,
+   "exitSlip": 0.05,
+   "mergeHold": true,
+   "entryFrom": 10,
+   "quoteEnd": 10,
+   "volMin": 0,
+   "volMax": null,
+   "minPrevVolume": 0,
+   "dailyStop": null,
+   "liqCap": true
+  }
+ ]
+}

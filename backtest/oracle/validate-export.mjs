@@ -1,13 +1,16 @@
 // Oracle Node de la non-régression maker : refait `node engine/maker-bt/validate.mjs --delay 0 --sim exact` du dépôt
 // source (lecture seule : ses modules sont importés, rien n'y est écrit) et exporte, en plus des mêmes lignes de
 // résumé, chaque jumeau rejoué par simWindow avec ses valeurs f64 en bits (hexadécimal), pour une comparaison bit à bit.
-//   node --max-old-space-size=8192 backtest/oracle/validate-export.mjs <racine du dépôt source> <sortie.jsonl> [débuts de fenêtres,...]
+//   node --max-old-space-size=8192 backtest/oracle/validate-export.mjs <racine du dépôt source> <sortie.jsonl> [débuts de fenêtres,...] [--maker 0x...]
+// --maker : les ordres d'un wallet (arcsine), comme `validate.mjs --maker` (bloc repris de validate.mjs:90-101).
 // Les lignes de résumé reprennent celles de validate.mjs:105-112 et 131-133, au caractère près.
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const [src, outFile, only] = process.argv.slice(2);
+const argv = process.argv.slice(2), mi = argv.indexOf('--maker');
+const maker = mi >= 0 ? argv.splice(mi, 2)[1].toLowerCase() : null;
+const [src, outFile, only] = argv;
 if (!src || !outFile) { console.error('usage: validate-export.mjs <source root> <out.jsonl> [starts]'); process.exit(2); }
 const mod = (p) => import(pathToFileURL(path.join(src, 'engine', 'maker-bt', p)).href);
 const { twins } = await mod('validate.mjs');
@@ -20,8 +23,21 @@ const hex = (x) => { dv.setFloat64(0, x); return dv.getBigUint64(0).toString(16)
 const keep = only ? new Set(only.split(',').map(Number)) : null;
 const delay = 0;
 
+const arrivals = maker ? (x, recs, firstReal) => recs.findLast((r) => !r[4] && r[1] <= firstReal && r[1] >= firstReal - 300e3 && Math.abs(r[3] - r[2] - x.size) < 0.011) : null;
+let byWin = null;
+if (maker) {            // the wallet's matches per window, each order tagged with its on-chain hash
+  const DATA_DIR = path.join(src, 'data');
+  const EX = '0xe111180000d2663c0091e4f400237545b87b996b', read = (n) => fs.readFileSync(path.join(DATA_DIR, 'wallets', `${maker}.${n}.jsonl`), 'utf8').split(String.fromCharCode(10)).filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  const hash = new Map(); for (const r of read('orders')) if (r.taker !== EX) (hash.get(r.tx) ?? hash.set(r.tx, []).get(r.tx)).push(r);
+  const win = new Map(); for (const g of fs.readdirSync(path.join(DATA_DIR, 'polymarket', 'windows'))) if (g.startsWith('btc-updown-5m-')) { const w = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'polymarket', 'windows', g), 'utf8')); for (const t of w.tokens ?? []) win.set(t, w.start); }
+  byWin = new Map();
+  for (const m of read('calldata')) {
+    for (const x of m.makers) x.hash = hash.get(m.tx)?.find((r) => r.token === x.token && Math.abs(r.shares - x.filled) < 0.011)?.order;
+    const st = win.get(m.makers[0]?.token); if (st != null) (byWin.get(st) ?? byWin.set(st, []).get(st)).push(m);
+  }
+}
 const all = [];
-for (const m of loadB()) { if (keep && !keep.has(m.start)) continue; const t = twins(m.start, { delay }); if (t) all.push(...t); }
+for (const m of loadB()) { if (keep && !keep.has(m.start)) continue; if (byWin && !byWin.has(m.start)) continue; const t = twins(m.start, { delay, maker, arrivals, matches: byWin?.get(m.start) }); if (t) all.push(...t); }
 const ok = all.filter((x) => !x.missing), q = (a, p) => { a = [...a].sort((u, v) => u - v); return a[Math.floor(p * (a.length - 1))]; };
 const R = ok.reduce((t, x) => t + x.realSh, 0), P = ok.reduce((t, x) => t + x.predSh, 0);
 console.log(`orders ${all.length}, arrival found ${ok.length}; real filled ${R.toFixed(0)} sh, predicted ${P.toFixed(0)} sh (ratio ${(P / R).toFixed(3)})`);

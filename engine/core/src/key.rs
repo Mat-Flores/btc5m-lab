@@ -32,9 +32,35 @@ pub fn decrypt_v1(payload: &str, passphrase: &str) -> Result<Zeroizing<[u8; 32]>
     Ok(out)
 }
 
+/// The inverse of `decrypt_v1`: the key, written as `0x` + 64 hex digits, sealed under the passphrase. `salt` and `iv`
+/// must be fresh random bytes (the caller reads them from the OS); the same inputs give the same payload.
+pub fn encrypt_v1(key: &[u8; 32], passphrase: &str, salt: &[u8; 16], iv: &[u8; 12]) -> Result<String, KeyError> {
+    let mut k = Zeroizing::new([0u8; 32]);
+    scrypt::scrypt(passphrase.as_bytes(), salt, &scrypt::Params::new(17, 8, 1, 32).map_err(|_| KeyError::Format)?, &mut k[..]).map_err(|_| KeyError::Format)?;
+    let mut txt = Zeroizing::new(String::with_capacity(66));
+    txt.push_str("0x");
+    for b in key { txt.push_str(&format!("{b:02x}")); }
+    let mut sealed = Aes256Gcm::new_from_slice(&k[..]).map_err(|_| KeyError::Format)?.encrypt(Nonce::from_slice(iv), txt.as_bytes()).map_err(|_| KeyError::Format)?;
+    // aes-gcm appends the 16-byte tag; the v1 format stores it before the ciphertext
+    let tag = sealed.split_off(sealed.len() - 16);
+    let e = |b: &[u8]| URL_SAFE_NO_PAD.encode(b);
+    Ok(format!("v1.{}.{}.{}.{}", e(salt), e(iv), e(&tag), e(&sealed)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encrypt_round_trips_and_rebuilds_the_application_payload() {
+        let v = vector();
+        let (pass, payload) = (v["passphrase"].as_str().unwrap(), v["payload"].as_str().unwrap());
+        let p: Vec<Vec<u8>> = payload.split('.').skip(1).map(|s| URL_SAFE_NO_PAD.decode(s).unwrap()).collect();
+        let (salt, iv): ([u8; 16], [u8; 12]) = (p[0].clone().try_into().unwrap(), p[1].clone().try_into().unwrap());
+        assert_eq!(encrypt_v1(&[0x11; 32], pass, &salt, &iv).unwrap(), payload);
+        let k = [0xa5u8; 32];
+        assert_eq!(*decrypt_v1(&encrypt_v1(&k, "autre", &[7; 16], &[9; 12]).unwrap(), "autre").unwrap(), k);
+    }
 
     fn vector() -> serde_json::Value {
         serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/sign/key-v1.json")).unwrap()).unwrap()

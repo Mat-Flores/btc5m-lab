@@ -1,0 +1,12 @@
+{
+  "wallet": "0xf0318c32136c2db7fec88b84869aee6a1106c80c",
+  "mode": "paper",
+  "wallet_file": "/var/lib/copy-trading/wallet",
+  "journal": "/var/lib/copy-trading/journal.jsonl",
+  "k": 100.0,
+  "paper_cash_usd": 20.0,
+  "max_order_usd": 20.0,
+  "max_slippage": 0.10,
+  "rpc_ws": "wss://polygon-bor-rpc.publicnode.com",
+  "rpc_http": "https://polygon-bor-rpc.publicnode.com"
+}

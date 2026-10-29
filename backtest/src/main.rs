@@ -1,18 +1,18 @@
 //! backtest — the engine's strategies on recorded data, with the simulated exchange (README.md).
 //!   backtest run      [--config config/default.json] [--override f.json]... [--batch lot.json] [--windows a,b] [--export out.jsonl]
-//!   backtest validate [--config ...] [--override ...] [--windows a,b] [--export out.jsonl]
+//!   backtest validate [--config ...] [--override ...] [--windows a,b] [--maker 0x...] [--export out.jsonl]
 //!   backtest compare  <oracle.jsonl> <ours.jsonl>
 use backtest::config::Config;
 use backtest::packs::{parse_utc, Source};
 use std::io::Write;
 use std::path::PathBuf;
 
-struct Args { config: PathBuf, overrides: Vec<PathBuf>, batch: Option<PathBuf>, windows: Option<Vec<u64>>, export: Option<PathBuf>, rest: Vec<String> }
+struct Args { config: PathBuf, overrides: Vec<PathBuf>, batch: Option<PathBuf>, windows: Option<Vec<u64>>, export: Option<PathBuf>, maker: Option<String>, rest: Vec<String> }
 
 fn args() -> Result<(String, Args), String> {
     let mut it = std::env::args().skip(1);
     let cmd = it.next().ok_or("usage: backtest run|validate|compare …")?;
-    let mut a = Args { config: PathBuf::from("config/default.json"), overrides: vec![], batch: None, windows: None, export: None, rest: vec![] };
+    let mut a = Args { config: PathBuf::from("config/default.json"), overrides: vec![], batch: None, windows: None, export: None, maker: None, rest: vec![] };
     while let Some(x) = it.next() {
         let mut val = || it.next().ok_or(format!("{x}: value missing"));
         match x.as_str() {
@@ -21,6 +21,7 @@ fn args() -> Result<(String, Args), String> {
             "--batch" => a.batch = Some(val()?.into()),
             "--windows" => a.windows = Some(val()?.split(',').map(|s| s.parse().map_err(|_| format!("--windows {s}"))).collect::<Result<_, _>>()?),
             "--export" => a.export = Some(val()?.into()),
+            "--maker" => a.maker = Some(val()?),
             _ if x.starts_with("--") => return Err(format!("unknown option {x}")),
             _ => a.rest.push(x),
         }
@@ -62,7 +63,8 @@ fn real_main() -> Result<(), String> {
             base.spot = "okx".into(); // validate.mjs: normalize({}), the packs' OKX
             let t0 = std::time::Instant::now();
             let mut ex = export(&a)?;
-            let r = backtest::validate::run(&src, &wins, &base, &v, v.fill_lookback_ms / 1000.0, a.windows.as_deref(), ex.as_mut().map(|e| e.as_mut() as &mut dyn Write))?;
+            let wallet = a.maker.as_deref().map(|m| backtest::validate::wallet(&src, &c.path(&c.pack.wallets_dir), m)).transpose()?;
+            let r = backtest::validate::run(&src, &wins, &base, &v, v.fill_lookback_ms / 1000.0, a.windows.as_deref(), wallet.as_ref(), ex.as_mut().map(|e| e.as_mut() as &mut dyn Write))?;
             for l in &r.lines { println!("{l}"); }
             println!("({} s)", t0.elapsed().as_secs());
             Ok(())

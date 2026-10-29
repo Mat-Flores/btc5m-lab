@@ -29,6 +29,7 @@ Toutes validées par l'utilisateur le 2026-10-27, sauf D3 qui a été modifiée 
 | D12 (2026-10-28) | Les traces converties sont dans le projet (`source-tracing/trace/`), jamais commitées | Décision utilisateur ([contrats-migration.md:202](migration/contrats-migration.md)) |
 | D13 (2026-10-28) | Backtest : `default.json` + un TOML commenté par stratégie ; signal par défaut binance-spot, σ×1,3 | Décision utilisateur ([contrats-migration.md:203](migration/contrats-migration.md)) |
 | Tick de l'engine (2026-10-28) | Le tick d'une fenêtre suit le flux (`tick_size_change`, tick d'un instantané ; niveau hors grille sur les anciennes traces) : l'engine refusait auparavant tout ordre à 0,001 (358 refus sur une journée de traces) | Décision utilisateur ; `engine/app/src/engine.rs` (`follow_tick`) |
+| `last_trade_price` comme trades du mode trace (2026-10-28) | Validé contre data-api sur 38 fenêtres : 99,5 % des transactions preneuses, même taille ; volume par niveau rappel 90 %, précision 92 % ; volume crédité aussi au niveau miroir | Mesure `backtest/scripts/ltp-check.mjs` |
 
 Référence de non-régression du simulateur maker (tolérance zéro) : `validate.mjs --delay 0 --sim exact` donne 59 695 ordres, volume ×1,044, 84,1 % d'ordres exacts, PnL 16 581 $ prédit pour 17 331 $ réel ([contrats-migration.md:142-156](migration/contrats-migration.md), décision utilisateur du 2026-10-27 ; chiffres aussi dans `engine/maker-bt/WALLETS.md:19`).
 

@@ -107,7 +107,7 @@ Règles associées :
 
 ## 5. Exchange simulé (`SimVenue`)
 
-Le modèle repose sur l'exchange de `engine/maker-bt/sim.mjs`, avec la décision D6 (§9). Il existe en deux exemplaires, de mêmes règles : `WindowVenue` (`backtest/src/venue.rs`) rejoue une fenêtre des packs, et c'est lui que valide la non-régression ; `TraceVenue` (`backtest/src/run.rs`) implémente le trait `Venue` de l'engine sur les traces. Écart à la cible : le mode papier du live garde son propre appariement (`adapter_polymarket::paper`), il n'y a donc pas encore un seul exchange simulé pour le papier et le backtest.
+Le modèle repose sur l'exchange de `engine/maker-bt/sim.mjs`, avec la décision D6 (§9). Il existe en deux exemplaires, de mêmes règles : `WindowVenue` (`backtest/src/venue.rs`) rejoue une fenêtre des packs, et c'est lui que valide la non-régression ; `TraceVenue` (`backtest/src/run.rs`) implémente le trait `Venue` de l'engine sur les traces. Écart à la cible : le mode papier du live garde son propre appariement (`adapter_polymarket::paper`), il n'y a donc pas encore un seul exchange simulé pour le papier et le backtest. **Décision du 2026-10-28** : unifier (le papier passe par `TraceVenue`) au moment où une stratégie maker passera en papier, pas avant ; rappel en tête de `engine/app/src/paper.rs`.
 
 ### 5.1 Ce que le modèle reproduit
 
@@ -310,6 +310,6 @@ Décision D6 ([contrats-migration.md:138](migration/contrats-migration.md), [:18
 
 ## 10. Points à vérifier
 
-Limites du mode trace (mesurées le 2026-10-28, détail dans [`backtest/README.md`](../backtest/README.md)) : décalage d'horloge des anciennes sessions non transmis à l'engine ; borne `exact` sans trades sur les anciennes traces ; traces courantes du 28/10 sans résultat officiel (traceur corrigé et redéployé le jour même).
+Limites du mode trace (mesurées le 2026-10-28, détail dans [`backtest/README.md`](../backtest/README.md)) : décalage d'horloge des anciennes sessions non transmis à l'engine ; borne `exact` sans trades sur les anciennes traces (sur les traces courantes, `last_trade_price` validé contre data-api : 99,5 % des transactions, volume par niveau rappel 90 % / précision 92 %) ; traces courantes du 28/10 sans résultat officiel (traceur corrigé et redéployé le jour même).
 
 Points `[à vérifier]` d'architecture ([conception-engine-migration.md:22](migration/conception-engine-migration.md)) : symétrie de l'aller simple ; délai de réponse d'un ordre accepté ; ordre de sortie des ordres retenus ; retenue des annulations maker ; sémantique FOK ; post-only vérifié à l'arrivée vs à la décision ; file mesurée à la décision vs à l'arrivée ; impact de nos ordres sur le carnet ; annulations prorata vs « toutes derrière » ; `last_trade_price` vs `labelTrades` ; taille minimale côté serveur ; arrondi des frais (5 décimales vs entier exact) ; durabilité des rebates ; délai de réclamation ; ordres après la fin de fenêtre ; slug d'un autre actif ; taux de trades `FAILED` ; `bench/parity.sh` absent.

@@ -5,6 +5,9 @@
 //! own. Every figure here is simulated.
 //! The feeds are also captured in the old application's session format (`src/feeds/session.js`), so the old
 //! backtester, `read-session` and `replay/` read a phase 9 run as they read a recorded session.
+//! shortcut: this paper matching (FAK only, `adapter_polymarket::paper`) is not the backtest's simulated exchange
+//! (`backtest/src/run.rs`, `TraceVenue`: FAK and post-only bids, queue, fill bounds). Before any maker strategy runs in
+//! paper, replace it with `TraceVenue` so paper and backtest share one exchange (decision of 2026-10-28).
 use super::Hist;
 use adapter_polymarket::paper::{self as sim, TAKER_DELAY_MS};
 use adapter_polymarket::sign::{self, Signer};

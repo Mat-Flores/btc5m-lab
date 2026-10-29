@@ -9,7 +9,8 @@
     "source_root": "/mnt/c/dev/REA Projects/btc5m-lag-sim",
     "data_dir": "data",
     "packs_dir": "engine/maker-bt/packs",
-    "mix_latency_ms": { "perp": 113, "coinbase": 40 }
+    "mix_latency_ms": { "perp": 113, "coinbase": 40 },
+    "wallets_dir": "../data/wallets"
   },
   "sources": [
     { "name": "polymarket-clob", "adapter": "polymarket-market", "input": { "trace": "polymarket-clob", "recv_lag_ms": 0 } },

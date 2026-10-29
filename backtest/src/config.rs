@@ -26,7 +26,7 @@ pub struct MixLatency { pub perp: f64, pub coinbase: f64 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PackCfg { pub source_root: String, pub data_dir: String, pub packs_dir: String, pub mix_latency_ms: MixLatency }
+pub struct PackCfg { pub source_root: String, pub data_dir: String, pub packs_dir: String, pub mix_latency_ms: MixLatency, pub wallets_dir: String }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

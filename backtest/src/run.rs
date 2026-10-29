@@ -165,6 +165,8 @@ pub struct TraceVenue {
     live: HashMap<u32, Live>,
     /// token → (fee schedule, window end s).
     markets: HashMap<String, (FeeSchedule, u64)>,
+    /// token → the other token of its market (the books are mirrors: a Down bid at p is an Up ask at 1 − p).
+    other: HashMap<String, String>,
     /// Trade volume seen per (token, price) since its level's last change (`exact`).
     traded: HashMap<(String, Micro), Micro>,
     /// Last change of each token's book (µs), for `silence_ms`.
@@ -176,11 +178,15 @@ pub struct TraceVenue {
 impl TraceVenue {
     pub fn new(cfg: VenueCfg) -> TraceVenue {
         let seed = cfg.taker_hold.seed;
-        TraceVenue { cfg, books: engine_app::engine::new_books(u64::MAX), rng: Rng::new(seed), live: HashMap::new(), markets: HashMap::new(), traded: HashMap::new(),
+        TraceVenue { cfg, books: engine_app::engine::new_books(u64::MAX), rng: Rng::new(seed), live: HashMap::new(), markets: HashMap::new(), other: HashMap::new(), traded: HashMap::new(),
             last_change: HashMap::new(), events: vec![], trades: 0 }
     }
 
-    pub fn window(&mut self, w: &Window) { for t in &w.tokens { self.markets.insert(t.clone(), (w.fee, w.end)); } }
+    pub fn window(&mut self, w: &Window) {
+        for t in &w.tokens { self.markets.insert(t.clone(), (w.fee, w.end)); }
+        self.other.insert(w.tokens[0].clone(), w.tokens[1].clone());
+        self.other.insert(w.tokens[1].clone(), w.tokens[0].clone());
+    }
 
     fn fill(&mut self, n: u32, at: i64, token: &str, price: Micro, size: Micro, maker: bool) {
         let (fee, _) = self.markets.get(token).copied().unwrap_or((FeeSchedule::default(), 0));
@@ -214,7 +220,12 @@ impl TraceVenue {
         self.due(t);
         match &e.payload {
             Payload::BookSnapshot { asset, bids, asks, tick } => { let _ = self.books.snapshot(asset, bids, asks, *tick); self.last_change.insert(asset.clone(), t); }
-            Payload::Trade { asset, price, size, .. } => { *self.traded.entry((asset.clone(), *price)).or_insert(0) += size; }
+            // a trade empties its level and the mirror level of the other token (measured 2026-10-28: 99.5 % of
+            // data-api's taker transactions are in last_trade_price, same size; per level 90 % recall, 92 % precision)
+            Payload::Trade { asset, price, size, .. } => {
+                *self.traded.entry((asset.clone(), *price)).or_insert(0) += size;
+                if let Some(o) = self.other.get(asset) { *self.traded.entry((o.clone(), 1_000_000 - price)).or_insert(0) += size; }
+            }
             Payload::BookDelta { changes } => {
                 for c in changes {
                     let old = self.books.get(&c.asset).and_then(|b| level(b, c.side, c.price)).unwrap_or(0);
@@ -534,6 +545,15 @@ mod tests {
         v.feed(10_200_000, &bid(4_000_000));
         v.poll(stamp(10_200_000), &mut out);
         assert!(matches!(out[0].1, VenueEvent::Fill { n: 2, size: 3_000_000, price: 400_000, maker: true, rebate: Some(_), .. }), "{out:?}");
+        // the mirror: a sale of the other token at 0.60 is a trade at our 0.40 level
+        v.window(&Window { start: 0, end: 600, slug: "s".into(), market: "m".into(), tokens: ["u".into(), "d".into()], tick: 10_000, min_size: 5_000_000,
+            fee: FeeSchedule::default(), taker_delay: true, twap_s: None, price_to_beat: None, winner: None });
+        out.clear();
+        v.feed(10_300_000, &bid(9_000_000));
+        v.feed(10_400_000, &ev(Payload::Trade { asset: "d".into(), price: 600_000, size: 7_000_000, side: Side::Bid, id: "y".into() }));
+        v.feed(10_400_000, &bid(2_000_000));
+        v.poll(stamp(10_400_000), &mut out);
+        assert!(matches!(out[0].1, VenueEvent::Fill { n: 2, size: 2_000_000, .. }), "{out:?}");
     }
 }
 
