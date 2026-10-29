@@ -6,33 +6,34 @@
 
 **Fait**
 - Étapes 1 à 4 de la spec (détection chaîne + secours data-api, mises par paliers, paper/live, deploy/, COMMANDES.md).
-- Vague 1 (bddbacf) : resync du flux chaîne quand data-api rattrape un fill (abonnement logs perdu 4 h 20 le 29), rapport terminal corrigé.
-- Vague 2 (c3fd113) : stratégies interchangeables `strategy.rs` (exec maker|taker, achat cumulative|first_fill, vente lots|all, `cancel_after_min`), `maker.rs` (mes ordres posés + file d'attente paper ; ses ordres déduits + stats ; `stat` « annulation à tort »), engine : `body_typed` (GTC) et `cancel_request`. 28 tests copy-trading + tests adapter-polymarket verts.
-- Run de test maker en parallèle : `~/ct-maker` sur dublin-dry-run (PID lancé 2026-10-29 17:11 UTC, journal `~/ct-maker/journal.jsonl`), le service paper principal n'a PAS été relancé (consigne : ne pas relancer sans nécessité). Premiers résultats OK (pose, remplissage immédiat quand le carnet croise, file de 52 512 parts devant un autre ordre).
-- UI : `PRODUCT.md`, `UI-INVENTAIRE.md`. 1re série de maquettes (`.impeccable/mocks/decision/`) REJETÉE par l'utilisateur (« trop simpliste », dispositions mauvaises). Consigne : garder l'identité Polymarket, fusionner lui/moi, un graphique qui image les décalages. Nouvelle maquette `.impeccable/mocks/fusion.html` (capture `.impeccable/review/fusion.png`) : tokens Polymarket relevés sur leur CSS (bleu #3262FF = moi, orange #FF9900 = lui, gris #0C0E13/#1C1F27/#2D3037, vert #42C772, rouge #E23939, Inter, prix en ¢, pastilles Oui/Non, icônes gamma).
+- Vague 1 (bddbacf) : resync du flux chaîne quand data-api rattrape un fill ; rapport terminal corrigé.
+- Vague 2 (c3fd113) : stratégies interchangeables `strategy.rs` + ordres posés `maker.rs` ; engine `body_typed` (GTC) et `cancel_request`.
+- Vagues 3-4 (366f8a4, 93c7e39, a13ab3f) : inventaire `UI-INVENTAIRE.md`, `PRODUCT.md`, maquettes ; 1re série rejetée, `fusion.html` validée (identité Polymarket, décalages).
+- Vague 5 (361b567) : UI `copy-trading/ui/` (serve.py stdlib, index.html, app.css, app.js, model.js + test node) ; ligne `start` du journal porte la stratégie (pris en compte au prochain déploiement). COMMANDES.md : sections UI et stratégies.
+- UI vérifiée sur données réelles (journal taker du 29 et run maker en direct) par pilotage DevTools : survol → jumeaux allumés liste/graphique/cascade ; clic → sélection, carnet, « Suivre le direct ». 28 tests Rust + 2 tests modèle verts.
+- Run de test maker `~/ct-maker` toujours en cours sur dublin-dry-run (lancé 2026-10-29 17:11 UTC) ; service paper principal NON relancé (consigne).
 
 **Reste à faire**
-1. Validation de `fusion.html` par l'utilisateur, puis écrire le contrat de direction (`impeccable surface-brief write`) et construire l'UI : `copy-trading/ui/` = `serve.py` (stdlib, `ssh tail -F` du journal + proxys data-api/gamma/CLOB, SSE) + `index.html` (vanilla, sans dépendance).
-2. Après l'UI : revue impeccable (finish reviewer), DESIGN.md (documenter), commit.
-3. Vérifier dans `~/ct-maker/journal.jsonl` : lignes `check` `trade_side` (sens du preneur), remplissages `order fill`, puis arrêter ce run (`pkill -f maker.json`) quand l'utilisateur décide de basculer le service sur la stratégie maker (redéploiement = nouveau run).
+1. Verdict de la revue impeccable (finish reviewer) : appliquer ses correctifs matériels, puis DESIGN.md (documenter impeccable), commit.
+2. Basculer le service sur la stratégie maker = redéploiement (nouveau run) : seulement sur accord ; puis arrêter `~/ct-maker` (`pkill -f maker.json`).
+3. Lire dans `~/ct-maker/journal.jsonl` les `check` `trade_side` (sens du preneur) et les `order fill`.
 4. Live maker non vérifié sur ordre réel (GTC, annulation, `size_matched`) : premier test réel uniquement avec accord.
-5. Plus tard : analyse statistique de ses ordres (lignes `trade.his_order`, `stat`) pour rétro-ingénierie ; vérification des news par IA (idée utilisateur).
+5. Plus tard : analyse statistique de ses ordres (`trade.his_order`, `stat`) ; vérification des news par IA (idée utilisateur).
 
 **Décisions et pièges**
-- Ses ordres ouverts ne sont pas publics : on les déduit de ses fills ; ses annulations sont invisibles → annulation après `cancel_after_min` (360) sans fill de lui, et trace des annulations démenties.
-- Paper maker : file devant moi = taille du niveau au moment de la pose ; les annulations devant moi ne me font pas avancer (prudent). Le sens `side` des trades publics est supposé « preneur » : contrôlé par les lignes `check` `trade_side`.
-- Ventes `lots` : en gain, au moins un lot par vente qu'il pose ; en perte, sa fraction, tout dès qu'il a vendu la moitié ; un reste < minimum part avec le lot.
-- Réseau local : RPC Polygon filtrés → tout test réel sur Dublin. sh non interactif : `exec 3<&0` (deploy/start). systemd crée run.log en root.
-- PRODUCT.md est dans `copy-trading/` : lancer les commandes impeccable depuis `copy-trading/`.
+- Ses ordres ouverts ne sont pas publics : déduits de ses fills ; annulation après `cancel_after_min` sans fill de lui, et trace des annulations démenties.
+- Paper maker : file devant moi = taille du niveau à la pose ; les annulations devant moi ne me font pas avancer (prudent).
+- UI : ne pas capturer avec `msedge --headless --timeout` (capture au chargement, requêtes coupées) ni `--virtual-time-budget` (bloqué par le SSE) ; piloter Edge par DevTools (script node, `--remote-debugging-port`). Le navigateur ne tient que 6 connexions par hôte (dont le SSE) : les titres de marchés partent groupés (`/api/markets`).
+- Police Inter = identité Polymarket : exception au détecteur impeccable (`.impeccable/config.json`, ignoré par git car `config.json` est dans .gitignore).
+- Réseau local : RPC Polygon filtrés → tests réels sur Dublin. PRODUCT.md est dans `copy-trading/` : lancer impeccable depuis `copy-trading/`.
 
 **Fichiers clés**
-- `src/main.rs` (boucle, `maker`, `post`, `cancel`, `on_public_trade`, `expire`, `poll_rests`), `src/strategy.rs`, `src/maker.rs`, `src/{chain,book,sizing,pnl,report}.rs`.
-- `deploy/` (start/stop/report), `COMMANDES.md`, `config.example.json` (bloc `strategy`).
-- `PRODUCT.md`, `UI-INVENTAIRE.md`, `.impeccable/mocks/decision/`.
+- `src/main.rs` (boucle, `maker`, `post`, `cancel`, `on_public_trade`, `expire`, `poll_rests`), `src/strategy.rs`, `src/maker.rs`.
+- `ui/serve.py` (ssh tail -F, SSE, proxys cache), `ui/model.js` (dérivation testée), `ui/app.js` (rendu, associations), `ui/app.css`.
+- `deploy/`, `COMMANDES.md`, `config.example.json`, `.impeccable/surfaces/ui-index-html.md` (contrat de direction).
 
 **Commandes utiles**
-- Tests : WSL `CARGO_TARGET_DIR=$HOME/ct-target cargo test --release` dans copy-trading/. Build arm64 : `deploy/build-wsl.sh`.
-- Journal test : `ssh -i ~/.ssh/dublin-dry-run.pem ubuntu@54.76.142.4 'cat ~/ct-maker/journal.jsonl'`.
-- Capture d'une maquette : Edge headless `--screenshot` (voir session du 29/10).
+- Tests : WSL `CARGO_TARGET_DIR=$HOME/ct-target cargo test --release` dans copy-trading/ ; `node --test copy-trading/ui/model.test.mjs`.
+- UI : `python copy-trading/ui/serve.py` (service) ou `--journal /home/ubuntu/ct-maker/journal.jsonl --no-sudo --port 8767` (test), puis http://127.0.0.1:8765/.
 
-**Prochaine action** : recueillir la validation (ou les retouches) de `.impeccable/mocks/fusion.html`, puis construire `copy-trading/ui/` sur cette disposition (données réelles du journal via ssh tail -F).
+**Prochaine action** : appliquer le verdict du finish reviewer impeccable sur `copy-trading/ui/`, recapturer (DevTools), puis lancer le documenter (DESIGN.md) et commiter.
