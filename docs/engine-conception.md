@@ -1,6 +1,6 @@
 # Conception de l'engine
 
-Ce fichier synthétise la mission, les règles de conception, la carte de l'ancien chemin d'ordre, l'architecture Rust retenue, ses contrats, le registre et les cibles chiffrées de l'engine du dépôt source `btc5m-lag-sim`. Les mesures de chaque phase sont dans [engine-mesures-phases.md](engine-mesures-phases.md) ; la sécurité dans [securite-et-mode-reel.md](securite-et-mode-reel.md) ; les décisions datées dans [journal-decisions.md](journal-decisions.md).
+Ce fichier synthétise la mission, les règles de conception, la carte de l'ancien chemin d'ordre, l'architecture Rust retenue, ses contrats, le registre et les cibles chiffrées de l'engine du dépôt source `btc5m-lag-sim`. Les mesures de chaque phase sont dans [engine-mesures-phases.md](recherche/engine-mesures-phases.md) ; la sécurité dans [securite-et-mode-reel.md](securite-et-mode-reel.md) ; les décisions datées dans [journal-decisions.md](journal-decisions.md).
 
 Convention : chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule), cités `fichier:ligne`. `[à vérifier]` marque ce qui n'est pas établi. Le refactor de la migration (séparation horloge / flux / exchange pour le backtest) est décrit dans `architecture-backtest.md`, pas ici.
 

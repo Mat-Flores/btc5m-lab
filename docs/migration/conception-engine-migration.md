@@ -1,5 +1,7 @@
 # Design engine live/test — rapport de conception (phase 1, agent opus, 2026-10-27), synthèse
 
+**Historique.** Conception de la migration (2026-10-27). L'état actuel : [architecture-backtest.md](../architecture-backtest.md).
+
 Chemins relatifs au dépôt source `btc5m-lag-sim`.
 
 ## Architecture constatée

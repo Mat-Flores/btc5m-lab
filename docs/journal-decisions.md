@@ -2,30 +2,35 @@
 
 Ce fichier regroupe les décisions datées et les verdicts (y compris les impasses) de la recherche menée dans `btc5m-lag-sim`, puis les décisions de la migration vers `updown5m-lab`. Il ne garde que ce qui engage la suite ; le tâtonnement est supprimé.
 
-Convention de citation : tous les chemins sont relatifs au dépôt source `btc5m-lag-sim` (lecture seule), sous la forme `fichier:ligne`. `[à vérifier]` marque ce qui n'est pas établi. « Décision de l'utilisateur » = décision écrite dans le journal source ; « décision utilisateur du 2026-10-27 » = décision de la migration, consignée dans les contrats figés de la migration ([contrats-migration.md](contrats-migration.md), décisions D1 à D9 aux lignes 181-189, exigences E1 et E2 aux lignes 192-197) et dans `PROMPT-MIGRATION.md` du dépôt cible. La conception engine live/test de la migration et la référence de non-régression mesurée le 2026-10-27 sont dans [conception-engine-migration.md](conception-engine-migration.md).
+Convention de citation : tous les chemins sont relatifs au dépôt source `btc5m-lag-sim` (lecture seule), sous la forme `fichier:ligne`. `[à vérifier]` marque ce qui n'est pas établi. « Décision de l'utilisateur » = décision écrite dans le journal source ; « décision utilisateur du 2026-10-27 » = décision de la migration, consignée dans les contrats figés de la migration ([contrats-migration.md](migration/contrats-migration.md), décisions D1 à D9 aux lignes 181-189, exigences E1 et E2 aux lignes 192-197) et dans `PROMPT-MIGRATION.md` du dépôt cible. La conception engine live/test de la migration et la référence de non-régression mesurée le 2026-10-27 sont dans [conception-engine-migration.md](migration/conception-engine-migration.md).
 
-Voir aussi : [engine-conception.md](engine-conception.md), [engine-mesures-phases.md](engine-mesures-phases.md), [securite-et-mode-reel.md](securite-et-mode-reel.md), [exploitation-deploiement.md](exploitation-deploiement.md).
+Voir aussi : [engine-conception.md](engine-conception.md), [engine-mesures-phases.md](recherche/engine-mesures-phases.md), [securite-et-mode-reel.md](securite-et-mode-reel.md), [exploitation-deploiement.md](recherche/exploitation-deploiement.md).
 
-## 1. Décisions de la migration (2026-10-27)
+## 1. Décisions de la migration (2026-10-27 et 28)
 
 Toutes validées par l'utilisateur le 2026-10-27, sauf D3 qui a été modifiée par lui (rester gratuit).
 
 | Id | Décision | Raison / portée |
 | --- | --- | --- |
-| D1 ([contrats-migration.md:181](contrats-migration.md)) | Rapatriement anticipé AUTORISÉ, en lecture seule, des sessions des 2 serveurs vers `C:\dev\REA Projects\updown5m-staging\<nœud>\`, sha256 vérifié ; les fichiers en cours d'écriture sont recopiés plus tard (étape « 3a ») | Les anciens serveurs purgent les sessions à 14 jours (`deploy/setup-ubuntu.sh:115-120`), la première purge étant attendue le 2026-10-31 (information de la session de migration, `[à vérifier]` dans le dépôt source). Voir [exploitation-deploiement.md](exploitation-deploiement.md) |
-| D2 ([contrats-migration.md:182](contrats-migration.md)) | 3 nouveaux adapters `binance-spot`, `binance-perp`, `coinbase`, sans nouvelle crate | Logique de parsing reprise de `git show 7138fbc^:src/feeds/live.js` du dépôt source |
-| D3 ([contrats-migration.md:183](contrats-migration.md)) | PAS d'agrandissement du disque EBS (solution gratuite) : `pull-traces` quotidien et garde disque dans le tracer (arrêt d'écriture si l'espace libre < 2 Go, reprise au-dessus de 3 Go) | Préférence de l'utilisateur : rester gratuit |
-| D4 ([contrats-migration.md:184](contrats-migration.md)) | `sha2` déclarée en dépendance directe dans `source-tracing/` | Déjà présente dans `engine/Cargo.lock` |
-| D5 ([contrats-migration.md:185](contrats-migration.md)) | Plusieurs hôtes le même jour (anciennes traces seulement) : `<AAAA-MM-JJ>.<host>.old.jsonl.gz` pour les hôtes secondaires | L'hôte qui a le plus de lignes garde le nom canonique |
-| D6 ([contrats-migration.md:186](contrats-migration.md)) | SimVenue réaliste (fill livré à l'arrivée) ; non-régression bit à bit limitée aux configs sans TP/SL (x01, x04, validate) ; écart documenté | Voir `simulateur-maker.md` |
-| D7 ([contrats-migration.md:187](contrats-migration.md)) | `.claude/skills/prompt-master/` copié SANS son `.git` ; `read-session` copié identique (inerte, documenté) | Voir [skills.md](skills.md) |
-| D8 ([contrats-migration.md:188](contrats-migration.md)) | dublin-live : arrêt propre (sell-only, attendre les positions à plat) et confirmation nominative de l'utilisateur sur le wallet AVANT tout nettoyage (phase 3b) | Voir [securite-et-mode-reel.md](securite-et-mode-reel.md) §6 |
-| D9 ([contrats-migration.md:189](contrats-migration.md)) | `data/wallets` NON copié | Secrets |
-| E1 ([contrats-migration.md:192-196](contrats-migration.md)) | Au-delà du portage Rust du simulateur maker, essayer de corriger les décalages avec le réel (validate : volume ×1,044, PnL −4,3 %, 84,1 % d'ordres exacts ; arcsine : volume ×0,958, PnL +8,4 %, 71 %). Méthode : portage bit à bit d'abord ; chaque correction est ensuite une option NOUVELLE et paramétrée du modèle de l'exchange simulé (jamais de la logique d'une stratégie), de valeur par défaut reproduisant le comportement validé ; mesurée avant/après sur `validate` ; fondée sur une cause documentée ou mesurée ; fenêtres d'ajustement et de contrôle séparées ; résultat documenté dans `docs/` | Exigence ajoutée le 2026-10-27 |
-| E2 ([contrats-migration.md:197](contrats-migration.md)) | UN fichier de config éditable qui stocke TOUS les paramètres du backtest : `backtest/config/default.json` (marché, sources, exchange simulé, capital, stratégies). Aucune constante cachée dans le code ; un fichier de lot ne contient que des surcharges (fusion profonde). Documenté dans `backtest/README.md` | Exigence ajoutée le 2026-10-27 |
+| D1 ([contrats-migration.md:181](migration/contrats-migration.md)) | Rapatriement anticipé AUTORISÉ, en lecture seule, des sessions des 2 serveurs vers `C:\dev\REA Projects\updown5m-staging\<nœud>\`, sha256 vérifié ; les fichiers en cours d'écriture sont recopiés plus tard (étape « 3a ») | Les anciens serveurs purgent les sessions à 14 jours (`deploy/setup-ubuntu.sh:115-120`), la première purge étant attendue le 2026-10-31 (information de la session de migration, `[à vérifier]` dans le dépôt source). Voir [exploitation-deploiement.md](recherche/exploitation-deploiement.md) |
+| D2 ([contrats-migration.md:182](migration/contrats-migration.md)) | 3 nouveaux adapters `binance-spot`, `binance-perp`, `coinbase`, sans nouvelle crate | Logique de parsing reprise de `git show 7138fbc^:src/feeds/live.js` du dépôt source |
+| D3 ([contrats-migration.md:183](migration/contrats-migration.md)) | PAS d'agrandissement du disque EBS (solution gratuite) : rapatriement quotidien (`source-tracing/deploy/pull`, ex-`pull-traces`) et garde disque dans le tracer (arrêt d'écriture si l'espace libre < 2 Go, reprise au-dessus de 3 Go) | Préférence de l'utilisateur : rester gratuit |
+| D4 ([contrats-migration.md:184](migration/contrats-migration.md)) | `sha2` déclarée en dépendance directe dans `source-tracing/` | Déjà présente dans `engine/Cargo.lock` |
+| D5 ([contrats-migration.md:185](migration/contrats-migration.md)) | Plusieurs hôtes le même jour (anciennes traces seulement) : `<AAAA-MM-JJ>.<host>.old.jsonl.gz` pour les hôtes secondaires | L'hôte qui a le plus de lignes garde le nom canonique |
+| D6 ([contrats-migration.md:186](migration/contrats-migration.md)) | SimVenue réaliste (fill livré à l'arrivée) ; non-régression bit à bit limitée aux configs sans TP/SL (x01, x04, validate) ; écart documenté | Voir `simulateur-maker.md` |
+| D7 ([contrats-migration.md:187](migration/contrats-migration.md)) | `.claude/skills/prompt-master/` copié SANS son `.git` ; `read-session` copié identique (inerte, documenté) | Voir [skills.md](skills.md) |
+| D8 ([contrats-migration.md:188](migration/contrats-migration.md)) | dublin-live : arrêt propre (sell-only, attendre les positions à plat) et confirmation nominative de l'utilisateur sur le wallet AVANT tout nettoyage (phase 3b) | Voir [securite-et-mode-reel.md](securite-et-mode-reel.md) §6 |
+| D9 ([contrats-migration.md:189](migration/contrats-migration.md)) | `data/wallets` NON copié | Secrets |
+| E1 ([contrats-migration.md:192-196](migration/contrats-migration.md)) | Au-delà du portage Rust du simulateur maker, essayer de corriger les décalages avec le réel (validate : volume ×1,044, PnL −4,3 %, 84,1 % d'ordres exacts ; arcsine : volume ×0,958, PnL +8,4 %, 71 %). Méthode : portage bit à bit d'abord ; chaque correction est ensuite une option NOUVELLE et paramétrée du modèle de l'exchange simulé (jamais de la logique d'une stratégie), de valeur par défaut reproduisant le comportement validé ; mesurée avant/après sur `validate` ; fondée sur une cause documentée ou mesurée ; fenêtres d'ajustement et de contrôle séparées ; résultat documenté dans `docs/` | Exigence ajoutée le 2026-10-27 |
+| E2 ([contrats-migration.md:197](migration/contrats-migration.md)) | UN fichier de config éditable qui stocke TOUS les paramètres du backtest : `backtest/config/default.json` (marché, sources, exchange simulé, capital, stratégies). Aucune constante cachée dans le code ; un fichier de lot ne contient que des surcharges (fusion profonde). Documenté dans `backtest/README.md` | Exigence ajoutée le 2026-10-27 |
 | E1, correction 1 (2026-10-28) | `venue.cancel_ahead_factor` : défaut 1 (validé, non-régression à 0 écart), recommandé 0,5 : volume prédit/réel en contrôle (20→22/10) 1,052 → 1,006, PnL total −4,3 % → −2,9 %, ordres exacts −0,6 point ([`simulateur-maker.md`](simulateur-maker.md) §10.2) | Mesure sur `validate`, split au 2026-10-20 |
+| D10 (2026-10-28) | Les 2 instances `dublin-dry-run` et `dublin-live` sont coupées entièrement : services arrêtés, données rapatriées, EC2 arrêtées ; le tracing tourne sur la nouvelle instance « Up&Down-Tracing » | Décision utilisateur ([contrats-migration.md:200](migration/contrats-migration.md)) |
+| D11 (2026-10-28) | Plus d'UI (contrat 3 caduc) : trois commandes interactives `start`, `stop`, `pull` | Décision utilisateur ([contrats-migration.md:201](migration/contrats-migration.md)) |
+| D12 (2026-10-28) | Les traces converties sont dans le projet (`source-tracing/trace/`), jamais commitées | Décision utilisateur ([contrats-migration.md:202](migration/contrats-migration.md)) |
+| D13 (2026-10-28) | Backtest : `default.json` + un TOML commenté par stratégie ; signal par défaut binance-spot, σ×1,3 | Décision utilisateur ([contrats-migration.md:203](migration/contrats-migration.md)) |
+| E1, correction 2 (2026-10-28) | Pas d'option du modèle pour les ordres sans file devant eux : la surprédiction vient de la pose mal retrouvée par `validate` (tailles courantes) ([`simulateur-maker.md`](simulateur-maker.md) §10.3) | Mesure sur `validate` (ajustement) |
 
-Référence de non-régression du simulateur maker (tolérance zéro) : `validate.mjs --delay 0 --sim exact` donne 59 695 ordres, volume ×1,044, 84,1 % d'ordres exacts, PnL 16 581 $ prédit pour 17 331 $ réel ([contrats-migration.md:142-156](contrats-migration.md), décision utilisateur du 2026-10-27 ; chiffres aussi dans `engine/maker-bt/WALLETS.md:19`).
+Référence de non-régression du simulateur maker (tolérance zéro) : `validate.mjs --delay 0 --sim exact` donne 59 695 ordres, volume ×1,044, 84,1 % d'ordres exacts, PnL 16 581 $ prédit pour 17 331 $ réel ([contrats-migration.md:142-156](migration/contrats-migration.md), décision utilisateur du 2026-10-27 ; chiffres aussi dans `engine/maker-bt/WALLETS.md:19`).
 
 ## 2. Décisions de l'ancien chantier d'interface (2026-10-15 à 2026-10-17)
 
@@ -39,7 +44,7 @@ Référence de non-régression du simulateur maker (tolérance zéro) : `validat
 
 ## 3. Décisions de l'engine Rust (2026-10-18 à 2026-10-22)
 
-Source unique : `engine/JOURNAL.md` (tableau « Décisions », lignes 21 à 74). Les lignes sont citées ; les mesures associées sont dans [engine-mesures-phases.md](engine-mesures-phases.md).
+Source unique : `engine/JOURNAL.md` (tableau « Décisions », lignes 21 à 74). Les lignes sont citées ; les mesures associées sont dans [engine-mesures-phases.md](recherche/engine-mesures-phases.md).
 
 ### 2026-10-18 (phase 0 et 1)
 
@@ -130,16 +135,8 @@ Un trader réel est armé sur dublin-live, source okx, dans la session `2026-10-
 
 ## 6. Impasses à ne pas rouvrir sans fait nouveau
 
-| Impasse | Pourquoi | Source |
-| --- | --- | --- |
-| Stratégie preneuse sur signal OKX | Retenue réelle trop longue et trop variable | `engine/10-delai-appariement.md:99-100` |
-| Rejoindre le meilleur bid en maker sur toute la fenêtre (lot x03) | Tous négatifs (−36 à −87 % sur la semaine) ; nos fills sont plus adverses que ceux du maker moyen | `engine/maker-bt/WALLETS.md:183`, `engine/maker-bt/EXPLORATION.md:249` |
-| Hyperliquid piloté par Binance | Frais (9 pb) supérieurs au gain (1,7 à 3,8 pb) | `engine/JOURNAL.md:24` |
-| Papertrade | Prix lu à l'exécution | `engine/JOURNAL.md:25` |
-| Limitless, Kalshi, nœud de Londres | Voir §3 (2026-10-18 et 2026-10-22) | `engine/JOURNAL.md:27, :51, :127` |
-| Annuler le côté perdant en fin de fenêtre | Perdant déjà exécuté dans 61 à 85 % des fenêtres | `engine/JOURNAL.md:23` |
+Regroupées, avec leurs preuves, dans [pistes-ecartees.md](pistes-ecartees.md).
 
 ## 7. Points `[à vérifier]`
 
-- Date de la première purge des anciens serveurs (2026-10-31) : donnée de la session de migration ; le cron lui-même est bien dans `deploy/setup-ubuntu.sh:115-120` (`-mtime +14`).
 - Légalité locale de l'opération depuis Dublin pour un résident français : non étudiée (`engine/JOURNAL.md:31`).

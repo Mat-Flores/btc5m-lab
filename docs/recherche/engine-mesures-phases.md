@@ -1,6 +1,6 @@
 # Mesures et critères de sortie des phases de l'engine
 
-Ce fichier garde, phase par phase (3 à 10), les mesures, les critères de sortie et l'état de l'engine du dépôt source `btc5m-lag-sim`. La conception est dans [engine-conception.md](engine-conception.md) ; les décisions datées dans [journal-decisions.md](journal-decisions.md).
+Ce fichier garde, phase par phase (3 à 10), les mesures, les critères de sortie et l'état de l'engine du dépôt source `btc5m-lag-sim`. La conception est dans [engine-conception.md](../engine-conception.md) ; les décisions datées dans [journal-decisions.md](../journal-decisions.md).
 
 Convention : chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule), cités `fichier:ligne`. `[à vérifier]` marque ce qui n'est pas établi. Lieux de mesure : sauf mention, nœud `dublin-live` (t4g.small, ARM64, chrony à ~1 µs).
 

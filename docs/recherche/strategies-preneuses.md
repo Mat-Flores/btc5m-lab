@@ -4,7 +4,7 @@
 
 Conventions. Chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule). **Tous les résultats de stratégie de ce document sont simulés** sur des sessions enregistrées, sauf les 3 ordres réels de §6 (`engine/08-strategies.md:3-4`). `[à vérifier]` marque ce qui n'est pas établi. L'utilisateur décide seul de toute mise en réel.
 
-Voir aussi : [`strategies-maker.md`](strategies-maker.md) (C4 et les stratégies maker), [`ordres-et-appariement.md`](ordres-et-appariement.md) (taker delay), [`contraintes-marche.md`](contraintes-marche.md) (frais, tick, résolution), [`sources-de-prix-et-flux.md`](sources-de-prix-et-flux.md), [`donnees-publiques.md`](donnees-publiques.md), [`journal-decisions.md`](journal-decisions.md), [`engine-mesures-phases.md`](engine-mesures-phases.md), [`architecture-backtest.md`](architecture-backtest.md).
+Voir aussi : [`strategies-maker.md`](strategies-maker.md) (C4 et les stratégies maker), [`ordres-et-appariement.md`](ordres-et-appariement.md) (taker delay), [`contraintes-marche.md`](contraintes-marche.md) (frais, tick, résolution), [`sources-de-prix-et-flux.md`](sources-de-prix-et-flux.md), [`donnees-publiques.md`](donnees-publiques.md), [`journal-decisions.md`](../journal-decisions.md), [`engine-mesures-phases.md`](engine-mesures-phases.md), [`architecture-backtest.md`](../architecture-backtest.md).
 
 ---
 
@@ -40,7 +40,7 @@ Principes retenus face au taker delay (discussion du 2026-10-19, `engine/00-rech
 
 Source : `engine/08-strategies.md:57-61`. Les trois variantes passent deux fois (binaire du premier rejeu, puis binaire final avec `rttShare`) : 0 écart à chaque fois (`:63-65`). Un premier passage de la plus grande session (753 Mo) avait donné une sortie tronquée ; relancée seule, elle lit 39 968 329 événements, autant que l'ancien moteur, 0 écart : la cause était l'interruption du rejeu, pas le portage (`:72-74`). Le couloir « fastest » de l'ancienne application n'est pas une source de config et a été écarté ; les fenêtres encore ouvertes en fin d'enregistrement ne sont pas réglées par gamma (`:67-70`).
 
-Dans la migration, `strategy/src/reference.rs` reste **inchangé** et le registre refuse la référence si `horizon_s` ≠ 300 (voir [`architecture-backtest.md`](architecture-backtest.md)).
+Dans la migration, `strategy/src/reference.rs` reste **inchangé** et le registre refuse la référence si `horizon_s` ≠ 300 (voir [`architecture-backtest.md`](../architecture-backtest.md)).
 
 ## 3. Délais utilisés pour les candidates
 
@@ -90,7 +90,7 @@ Score de Brier de la juste valeur de Up, une fois par seconde, face au gagnant o
 | 1,5 (actuel) | 0,1429 | 0,1329 | 0,0293 | 0,1073 | 0,1689 | 0,2149 |
 | 2,0 | 0,1465 | 0,1381 | 0,0323 | 0,1119 | 0,1742 | 0,2190 |
 
-Source : `engine/08-strategies.md:191-195`. La validation glissante choisit 1,5 (écart de 0,0002 avec 1,0 à l'apprentissage) ; sur le test, 1,0 fait mieux. L'échantillon effectif est proche de 450 fenêtres, pas de 131 327 secondes. Le modèle est trop prudent au centre (σ × 1,5 : prédit 0,15 → observé 0,08 ; 0,35 → 0,28 ; 0,65 → 0,73). Aucun changement proposé sur 225 fenêtres de test (`:199-205`). Calibrages ultérieurs sur d'autres sources de prix : [`simulateur-maker.md`](simulateur-maker.md).
+Source : `engine/08-strategies.md:191-195`. La validation glissante choisit 1,5 (écart de 0,0002 avec 1,0 à l'apprentissage) ; sur le test, 1,0 fait mieux. L'échantillon effectif est proche de 450 fenêtres, pas de 131 327 secondes. Le modèle est trop prudent au centre (σ × 1,5 : prédit 0,15 → observé 0,08 ; 0,35 → 0,28 ; 0,65 → 0,73). Aucun changement proposé sur 225 fenêtres de test (`:199-205`). Calibrages ultérieurs sur d'autres sources de prix : [`simulateur-maker.md`](../simulateur-maker.md).
 
 ### 4.3 C5 : TWAP de règlement recalculé face au chiffre officiel
 
@@ -178,4 +178,4 @@ Sur 6 fenêtres consécutives (2026-10-18, 13:40 à 14:10 ET), les plus gros vol
 - Aucune stratégie preneuse n'a été confirmée sur une autre semaine ni sur des ordres réels remplis.
 - La distribution de retenue (p10 0,19 / p50 0,36 / p90 1,5 / max 3,5 s) vient de 3 ordres et du premier trade après un saut d'OKX, pas d'une mesure directe `[à vérifier]` (`engine/11-maker-polymarket.md:105`).
 - Le « traitement du moteur d'appariement » supposé nul (`engine/08-strategies.md:83`) et la symétrie de l'aller simple restent `[non vérifié]`.
-- Dans la migration, la référence est simulée par `SimVenue` avec une retenue paramétrable (`taker_hold`) : voir [`architecture-backtest.md`](architecture-backtest.md) §5.
+- Dans la migration, la référence est simulée par `SimVenue` avec une retenue paramétrable (`taker_hold`) : voir [`architecture-backtest.md`](../architecture-backtest.md) §5.

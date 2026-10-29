@@ -6,7 +6,7 @@
 
 **Lecture des citations.** Chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule). `E/` = `engine/` ; `RN/` = `engine/research_notes/Engine réel Polymarket BTC 5m/` ; `MB/` = `engine/maker-bt/`. Une citation `fichier:N-M` désigne les lignes du fichier. `[à vérifier]` : non établi ou contradictoire.
 
-**Renvois.** [sources-de-prix-et-flux.md](sources-de-prix-et-flux.md) · [strategies-preneuses.md](strategies-preneuses.md) (effet du délai sur la référence) · [strategies-maker.md](strategies-maker.md) · [simulateur-maker.md](simulateur-maker.md) · [securite-et-mode-reel.md](securite-et-mode-reel.md) · [plateformes-et-conformite.md](plateformes-et-conformite.md) · [engine-conception.md](engine-conception.md).
+**Renvois.** [sources-de-prix-et-flux.md](sources-de-prix-et-flux.md) · [strategies-preneuses.md](strategies-preneuses.md) (effet du délai sur la référence) · [strategies-maker.md](strategies-maker.md) · [simulateur-maker.md](../simulateur-maker.md) · [securite-et-mode-reel.md](../securite-et-mode-reel.md) · [plateformes-et-conformite.md](plateformes-et-conformite.md) · [engine-conception.md](../engine-conception.md).
 
 ---
 

@@ -4,7 +4,7 @@
 
 Conventions. Chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule). `EXPLORATION.md` désigne `engine/maker-bt/EXPLORATION.md` ; `WALLETS.md` désigne `engine/maker-bt/WALLETS.md`. Tout est simulé, aucun ordre n'a été envoyé. `[à vérifier]` : non établi. Le tâtonnement (prompt de reprise, compteur détaillé, tableaux par lot) n'est pas recopiée : une ligne par lot et les candidats nommés.
 
-Voir aussi : [`strategies-maker.md`](strategies-maker.md) (G1-G4), [`simulateur-maker.md`](simulateur-maker.md) (bornes de fill), [`wallets-arcsine-certova.md`](wallets-arcsine-certova.md), [`contraintes-marche.md`](contraintes-marche.md), [`sources-de-prix-et-flux.md`](sources-de-prix-et-flux.md), [`architecture-backtest.md`](architecture-backtest.md).
+Voir aussi : [`strategies-maker.md`](strategies-maker.md) (G1-G4), [`simulateur-maker.md`](../simulateur-maker.md) (bornes de fill), [`wallets-arcsine-certova.md`](wallets-arcsine-certova.md), [`contraintes-marche.md`](contraintes-marche.md), [`sources-de-prix-et-flux.md`](sources-de-prix-et-flux.md), [`architecture-backtest.md`](../architecture-backtest.md).
 
 ---
 
@@ -28,13 +28,13 @@ Voir aussi : [`strategies-maker.md`](strategies-maker.md) (G1-G4), [`simulateur-
 | R6 | **Confirmation** sur des jours enregistrés après le 22/10, jamais vus (`explore.mjs --confirm`) : l'IC95 de la borne « traversée » > 0 **et** l'EV basse (R7) > 0 (`EXPLORATION.md:337`) |
 | R7 | Assez de fills : sur les fenêtres **remplies**, l'espérance au bas de l'IC95 de Wilson du taux de gain est > 0 (perte non observée = toute la dépense). Ajouté le 23/10 car une stratégie rarement remplie peut avoir un IC95 serré sur les fenêtres jouées sans rien prouver |
 
-**Bornes de décision.** Prudente jusqu'au lot b04 ; « traversée » dès b05 (prudente + trades publics strictement à travers notre prix, « uniquement des preuves certaines ») ; `exact` à partir de x01 (`EXPLORATION.md:87-91, 703`). Définitions : [`simulateur-maker.md`](simulateur-maker.md).
+**Bornes de décision.** Prudente jusqu'au lot b04 ; « traversée » dès b05 (prudente + trades publics strictement à travers notre prix, « uniquement des preuves certaines ») ; `exact` à partir de x01 (`EXPLORATION.md:87-91, 703`). Définitions : [`simulateur-maker.md`](../simulateur-maker.md).
 
 **Pièges connus** (`EXPLORATION.md:65-70`) : multiplier les essais sur les mêmes ~808 fenêtres de `test` produit des faux positifs ; une stratégie retenue doit être confirmée sur des données postérieures au 22/10 ; une moyenne par fenêtre positive peut coexister avec la ruine en capital composé ; le 21/10 domine plusieurs résultats.
 
 **Compteur d'évaluations sur `test`** : 32 (grilles G1-G4 et H, 22/10) → 100 à la fin de b10 (23/10) → ~110 (réplicas de wallets, 24/10) → ~134 (réplicas d'arcsine en `exact`, 25/10) → ~136 (x01 à x05, 26/10) (`EXPLORATION.md:126-143`).
 
-**Format des lots.** Un lot est un JSON `{name, note, base, candidates[{id, desc, ...}]}` dans `engine/maker-bt/batches/` (clés pointées pour les paramètres imbriqués) ; 21 fichiers : `b01-leviers`, `b02-fin-de-fenetre`, `b03-fin-combinee`, `b04-fin-desaccord`, `b05-traversee-penny`, `b06-traversee-affinage`, `b07-retrait-rapide`, `b08-lt-mise`, `b09-fin-precoce-sure`, `b10-outsider-fin`, `diag-c4`, `r6-candidats-1` à `5`, `x01-retest-exact`, `x02-binance-spot`, `x03-binance-maker`, `x04-mix-frozen`, `x05-mix-maker`. Les candidats figés pour la confirmation R6 ne sont jamais modifiés : toute variante est un nouveau candidat (`EXPLORATION.md:339-340`). Ces lots doivent tourner dans le backtest de la migration (voir [`architecture-backtest.md`](architecture-backtest.md)).
+**Format des lots.** Un lot est un JSON `{name, note, base, candidates[{id, desc, ...}]}` dans `engine/maker-bt/batches/` (clés pointées pour les paramètres imbriqués) ; 21 fichiers : `b01-leviers`, `b02-fin-de-fenetre`, `b03-fin-combinee`, `b04-fin-desaccord`, `b05-traversee-penny`, `b06-traversee-affinage`, `b07-retrait-rapide`, `b08-lt-mise`, `b09-fin-precoce-sure`, `b10-outsider-fin`, `diag-c4`, `r6-candidats-1` à `5`, `x01-retest-exact`, `x02-binance-spot`, `x03-binance-maker`, `x04-mix-frozen`, `x05-mix-maker`. Les candidats figés pour la confirmation R6 ne sont jamais modifiés : toute variante est un nouveau candidat (`EXPLORATION.md:339-340`). Ces lots doivent tourner dans le backtest de la migration (voir [`architecture-backtest.md`](../architecture-backtest.md)).
 
 ## 2. Les lots b01 à b10 (borne prudente puis traversée)
 
@@ -116,4 +116,4 @@ Protocole de confirmation (`:321-339`) : copie incrémentale des octets nouveaux
 
 ## 6. Reste à faire (hors périmètre de ce document)
 
-Rejouer b01 à b10 et les confirmations dans le backtest de la migration, en `exact`, retenue 0, rebates, avec la juste valeur appropriée à chaque source ; confirmer sur des jours postérieurs au 22/10 avec ≥ 50 fills (R6/R7) ; lever la question de la coupure du carnet. Voir [`architecture-backtest.md`](architecture-backtest.md) §7 et §10.
+Rejouer b01 à b10 et les confirmations dans le backtest de la migration, en `exact`, retenue 0, rebates, avec la juste valeur appropriée à chaque source ; confirmer sur des jours postérieurs au 22/10 avec ≥ 50 fills (R6/R7) ; lever la question de la coupure du carnet. Voir [`architecture-backtest.md`](../architecture-backtest.md) §7 et §10.

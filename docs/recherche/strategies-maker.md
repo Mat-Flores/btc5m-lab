@@ -2,11 +2,11 @@
 
 **Verdict.** Aucune stratégie maker n'est recommandée. Aucun des 20 finalistes n'a un PnL positif en borne prudente hors échantillon avec un IC95 qui exclut 0. Le meilleur candidat mesuré, G2-A, fait +1,71 $ par fenêtre [−0,72 ; +4,13] hors échantillon, porté par le seul 21/10 (`engine/11-maker-polymarket.md:11-15`). L'hypothèse « deux côtés, puis annulation du côté perdant dans la dernière minute » (`engine/11-maker-polymarket.md:45`) est **réfutée** (`:47-58`).
 
-**Attention : ces chiffres sont historiques.** Ils ont été produits avec des bornes de fill ensuite reconnues biaisées (prudente : −97 % de PnL sur ordres réels ; voir [`simulateur-maker.md`](simulateur-maker.md)), **sans rebates** et avec une retenue de 0,15 s appliquée par défaut aux poses (`engine/maker-bt/WALLETS.md:20-24`, `engine/11-maker-polymarket.md:106,125`). Le verdict « Aucune stratégie n'est recommandée » (`engine/11-maker-polymarket.md:11`) est conservé ; il a été confirmé ensuite avec le moteur corrigé (voir [`exploration-maker-b01-b10.md`](exploration-maker-b01-b10.md) et [`wallets-arcsine-certova.md`](wallets-arcsine-certova.md)). Les chiffres ci-dessous servent de référence de méthode et d'ordres de grandeur, pas de PnL attendu.
+**Attention : ces chiffres sont historiques.** Ils ont été produits avec des bornes de fill ensuite reconnues biaisées (prudente : −97 % de PnL sur ordres réels ; voir [`simulateur-maker.md`](../simulateur-maker.md)), **sans rebates** et avec une retenue de 0,15 s appliquée par défaut aux poses (`engine/maker-bt/WALLETS.md:20-24`, `engine/11-maker-polymarket.md:106,125`). Le verdict « Aucune stratégie n'est recommandée » (`engine/11-maker-polymarket.md:11`) est conservé ; il a été confirmé ensuite avec le moteur corrigé (voir [`exploration-maker-b01-b10.md`](exploration-maker-b01-b10.md) et [`wallets-arcsine-certova.md`](wallets-arcsine-certova.md)). Les chiffres ci-dessous servent de référence de méthode et d'ordres de grandeur, pas de PnL attendu.
 
 Conventions. Chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule). **Tout est simulé ; aucun ordre maker n'a jamais été envoyé** (`engine/11-maker-polymarket.md:3,119`). `[à vérifier]` : non établi.
 
-Voir aussi : [`strategies-preneuses.md`](strategies-preneuses.md), [`ordres-et-appariement.md`](ordres-et-appariement.md), [`contraintes-marche.md`](contraintes-marche.md), [`architecture-backtest.md`](architecture-backtest.md), [`journal-decisions.md`](journal-decisions.md).
+Voir aussi : [`strategies-preneuses.md`](strategies-preneuses.md), [`ordres-et-appariement.md`](ordres-et-appariement.md), [`contraintes-marche.md`](contraintes-marche.md), [`architecture-backtest.md`](../architecture-backtest.md), [`journal-decisions.md`](../journal-decisions.md).
 
 ---
 
@@ -35,7 +35,7 @@ Lecture (`:171-183`) : la **sélection adverse est mesurée** : dans les 10 s qu
 
 ## 3. Le backtest de la phase 11 (maker-bt)
 
-Rejeu à la milliseconde des carnets enregistrés sur `dublin-dry-run` : 2 090 fenêtres de 5 min, du 15/10 00:20 au 22/10 19:20 UTC, avec les trades publics de Polymarket sur les mêmes fenêtres. Départ 1 000 $, capital composé (`engine/11-maker-polymarket.md:3-5`). Code : `engine/maker-bt/` (voir [`simulateur-maker.md`](simulateur-maker.md)).
+Rejeu à la milliseconde des carnets enregistrés sur `dublin-dry-run` : 2 090 fenêtres de 5 min, du 15/10 00:20 au 22/10 19:20 UTC, avec les trades publics de Polymarket sur les mêmes fenêtres. Départ 1 000 $, capital composé (`engine/11-maker-polymarket.md:3-5`). Code : `engine/maker-bt/` (voir [`simulateur-maker.md`](../simulateur-maker.md)).
 
 Découpage : `sel` = fenêtres avant le 2026-10-20 (paramètres choisis en borne prudente), `test` = à partir du 2026-10-20 (808 fenêtres, hors échantillon, sans retouche), `semaine` = un seul run composé sur les 2 090 fenêtres (`engine/maker-bt/results/G2/synthese.md:5-8`). Les 20 stratégies sont réparties en 4 groupes de risque ; 358 combinaisons × 3 bornes ont été évaluées sur `sel` (`engine/11-maker-polymarket.md:62`).
 
@@ -129,7 +129,7 @@ Source : `engine/11-maker-polymarket.md:83-88`.
 
 - **File devant nous** à la pose : médiane 0 part (77 % des poses arrivent sur un niveau vide, souvent au-dessus du meilleur bid), p90 406 parts (`:90` ; `calibration.json` : `queueAtJoin`).
 - **Baisses de notre niveau** : seules 12 à 23 % sont des trades ; le reste, des annulations. La borne optimiste, qui compte toute baisse du meilleur bid comme un fill, borne donc le **volume** et non le PnL : les annulations au meilleur bid précèdent les baisses de prix, ce sont les fills les plus adverses (`:91`).
-- La calibrée a la sélection adverse la plus faible (−0,014 à −0,025 $/part) et le meilleur PnL, mais n'était pas validée contre de vrais fills à l'époque. La recommandation restait donc fondée sur la prudente (`:92`). La validation sur ordres réels a eu lieu ensuite (calibrée : PnL +12 % sur les ordres des autres makers ; `exact` : −4,3 %) : voir [`simulateur-maker.md`](simulateur-maker.md).
+- La calibrée a la sélection adverse la plus faible (−0,014 à −0,025 $/part) et le meilleur PnL, mais n'était pas validée contre de vrais fills à l'époque. La recommandation restait donc fondée sur la prudente (`:92`). La validation sur ordres réels a eu lieu ensuite (calibrée : PnL +12 % sur les ordres des autres makers ; `exact` : −4,3 %) : voir [`simulateur-maker.md`](../simulateur-maker.md).
 - Contrôle du simulateur (C4, 1 888 fenêtres, horloge de `maker.rs`, sans retenue) : demi-écart 0,02 → −0,217 $ (prudente) / +0,071 $ (optimiste) ; 0,05 → −0,093 / +0,181 : les 4 valeurs sont dans les fourchettes de `08-strategies.md` §4.2 (`:93-100`).
 
 ### 3.7 Contraintes appliquées au simulateur
@@ -145,5 +145,5 @@ Jeux de données : voir l'annexe `engine/11-maker-polymarket.md:131-135` (trades
 ## 4. Ce qui a suivi (renvois)
 
 - Exploration de 10 lots de stratégies de fin de fenêtre et critères de fiabilité R1-R7 : [`exploration-maker-b01-b10.md`](exploration-maker-b01-b10.md).
-- Correction du simulateur (borne `exact`, retenue 0, rebates) et réplicas de wallets : [`simulateur-maker.md`](simulateur-maker.md), [`wallets-arcsine-certova.md`](wallets-arcsine-certova.md).
+- Correction du simulateur (borne `exact`, retenue 0, rebates) et réplicas de wallets : [`simulateur-maker.md`](../simulateur-maker.md), [`wallets-arcsine-certova.md`](wallets-arcsine-certova.md).
 - Verdict du JOURNAL, 2026-10-22 : les stratégies maker sont « aucune recommandée » et annuler le côté perdant en fin de fenêtre « n'a aucun effet (perdant déjà exécuté dans 61 à 85 % des fenêtres) » (`engine/JOURNAL.md:23`).

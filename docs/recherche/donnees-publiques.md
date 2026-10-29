@@ -6,7 +6,7 @@
 
 **Lecture des citations.** Chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule). `E/` = `engine/` ; `RN/` = `engine/research_notes/Engine réel Polymarket BTC 5m/` ; `MB/` = `engine/maker-bt/`. `fichier:N-M` désigne des lignes. `[à vérifier]` : non établi ou contradictoire. Les adresses de wallets sont celles des sources (publiques on-chain), tronquées comme dans les notes.
 
-**Renvois.** [contraintes-marche.md](contraintes-marche.md) · [sources-de-prix-et-flux.md](sources-de-prix-et-flux.md) · [wallets-arcsine-certova.md](wallets-arcsine-certova.md) · [simulateur-maker.md](simulateur-maker.md) · [strategies-maker.md](strategies-maker.md).
+**Renvois.** [contraintes-marche.md](contraintes-marche.md) · [sources-de-prix-et-flux.md](sources-de-prix-et-flux.md) · [wallets-arcsine-certova.md](wallets-arcsine-certova.md) · [simulateur-maker.md](../simulateur-maker.md) · [strategies-maker.md](strategies-maker.md).
 
 ---
 

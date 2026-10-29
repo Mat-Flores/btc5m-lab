@@ -32,6 +32,8 @@ Limites du mode trace (mesurées le 2026-10-28) :
 - **Borne `exact`** : elle a besoin des trades. Les anciens enregistrements Node n'en ont pas : seuls les asks qui croisent notre bid remplissent. Les traces courantes ont les `last_trade_price` ; leur appariement aux deltas est `[à vérifier]`.
 - **Tick 0,001** : quand la stratégie maker passe au tick de 0,001 (niveaux à 3 décimales, comme `sim.mjs`), l'engine refuse l'ordre, car le tick de la fenêtre reste à 0,01 (`engine/app/src/engine.rs`, `amounts`). Refus comptés et listés à la fin du run.
 - **Couverture** : Binance n'est enregistré que les 14→17/10 et 26→28/10. Le signal par défaut (binance-spot) n'existe pas les autres jours : la stratégie ne cote pas.
+- **Résultats officiels** : les traces courantes du 28/10 n'en ont aucun (le traceur cessait d'interroger gamma 120 s après la fin d'une fenêtre, le résultat arrive ≈ 5 min après) : aucun marché n'y est réglé. Corrigé dans `source-tracing` (900 s), effectif au prochain déploiement.
+- **Gamma interrogé toutes les 10 s** : chaque fenêtre et chaque résultat ne sont donnés qu'une fois à l'engine.
 - **Fichiers d'un hôte secondaire** (`<jour>.<hôte>.old.jsonl.gz`, D5) : ignorés, seul le fichier canonique du jour est lu.
 
 ## Configuration

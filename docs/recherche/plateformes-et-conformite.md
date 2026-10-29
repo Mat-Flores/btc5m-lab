@@ -6,7 +6,7 @@
 
 **Lecture des citations.** Chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule). `E/` = `engine/` ; `RN/` = `engine/research_notes/Engine réel Polymarket BTC 5m/`. `fichier:N-M` désigne des lignes. `[à vérifier]` : non établi ou contradictoire.
 
-**Renvois.** [contraintes-marche.md](contraintes-marche.md) · [ordres-et-appariement.md](ordres-et-appariement.md) · [securite-et-mode-reel.md](securite-et-mode-reel.md) · [exploitation-deploiement.md](exploitation-deploiement.md) · [journal-decisions.md](journal-decisions.md).
+**Renvois.** [contraintes-marche.md](contraintes-marche.md) · [ordres-et-appariement.md](ordres-et-appariement.md) · [securite-et-mode-reel.md](../securite-et-mode-reel.md) · [exploitation-deploiement.md](exploitation-deploiement.md) · [journal-decisions.md](../journal-decisions.md).
 
 ---
 

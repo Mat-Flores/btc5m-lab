@@ -6,7 +6,7 @@ Conventions. Chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule) 
 
 Les adresses de wallets ci-dessous sont des adresses publiques de la blockchain (`WALLETS.md:5-6`).
 
-Voir aussi : [`simulateur-maker.md`](simulateur-maker.md) (correction du simulateur sur les ordres réels d'arcsine), [`donnees-publiques.md`](donnees-publiques.md) (Data API, jointure des fills, heures de bloc), [`strategies-maker.md`](strategies-maker.md), [`exploration-maker-b01-b10.md`](exploration-maker-b01-b10.md), [`contraintes-marche.md`](contraintes-marche.md).
+Voir aussi : [`simulateur-maker.md`](../simulateur-maker.md) (correction du simulateur sur les ordres réels d'arcsine), [`donnees-publiques.md`](donnees-publiques.md) (Data API, jointure des fills, heures de bloc), [`strategies-maker.md`](strategies-maker.md), [`exploration-maker-b01-b10.md`](exploration-maker-b01-b10.md), [`contraintes-marche.md`](contraintes-marche.md).
 
 ---
 
@@ -132,7 +132,7 @@ L'edge sur le BTC 5 min **s'est éteint** de lui-même : de +29,7 k$ en avril à
 
 ## 4. Ce que ces wallets ont appris sur Polymarket (mesuré)
 
-Ces apprentissages (heures data-api en heures de bloc, trades dans les deltas `price_change`, matching FIFO, annulations au prorata, calldata `matchOrders`, rebates, retenue ne valant pas pour la pose) sont détaillés dans [`simulateur-maker.md`](simulateur-maker.md) et [`donnees-publiques.md`](donnees-publiques.md) (`WALLETS.md:31-43`). Points propres aux wallets : quand arcsine est rempli, il est le seul maker du niveau dans 42 % des cas ; quand il y en a plusieurs, il est le dernier servi dans 58 % des cas (le taker s'épuise sur lui) (`:39`).
+Ces apprentissages (heures data-api en heures de bloc, trades dans les deltas `price_change`, matching FIFO, annulations au prorata, calldata `matchOrders`, rebates, retenue ne valant pas pour la pose) sont détaillés dans [`simulateur-maker.md`](../simulateur-maker.md) et [`donnees-publiques.md`](donnees-publiques.md) (`WALLETS.md:31-43`). Points propres aux wallets : quand arcsine est rempli, il est le seul maker du niveau dans 42 % des cas ; quand il y en a plusieurs, il est le dernier servi dans 58 % des cas (le taker s'épuise sur lui) (`:39`).
 
 ## 5. Calibration de la juste valeur, mesurée en chemin
 
@@ -154,4 +154,4 @@ Source : `WALLETS.md:303-309`. Le milieu du carnet est bien calibré, avec un l�
 
 ## 7. Reproduire (nécessite des données non copiées)
 
-Commandes du dépôt source (`WALLETS.md:325-331`) : `wallets.mjs <wallet>` (toute l'activité vers `data/wallets/<wallet>.jsonl`), `wallet-stats.mjs`, `wallet-join.mjs` (fills × carnets enregistrés), `wallet-windows.mjs` (cache gamma + Binance hors semaine, ~3 req/s), `wallet-join-bn.mjs --sigma 1`, `wallet-replica.mjs <wallet> --strategy '<json>' --bounds through,calibrated`. Elles lisent `data/wallets/`, qui n'est **pas** copié dans le dépôt cible (décision D9). Données de la validation sur ordres réels : fills complets `data/polymarket/fills/` (2 357 fenêtres), ordres on-chain (35 fenêtres, 1 sur 60), fills on-chain d'arcsine (78 527 fills, 15/10 → 24/10), calldata d'arcsine (64 157 transactions maker) (`WALLETS.md:135-141`). La validation d'arcsine ne peut donc être refaite sans re-télécharger ces données ; voir [`architecture-backtest.md`](architecture-backtest.md) §7 et §8 pour l'impact sur la non-régression.
+Commandes du dépôt source (`WALLETS.md:325-331`) : `wallets.mjs <wallet>` (toute l'activité vers `data/wallets/<wallet>.jsonl`), `wallet-stats.mjs`, `wallet-join.mjs` (fills × carnets enregistrés), `wallet-windows.mjs` (cache gamma + Binance hors semaine, ~3 req/s), `wallet-join-bn.mjs --sigma 1`, `wallet-replica.mjs <wallet> --strategy '<json>' --bounds through,calibrated`. Elles lisent `data/wallets/`, qui n'est **pas** copié dans le dépôt cible (décision D9). Données de la validation sur ordres réels : fills complets `data/polymarket/fills/` (2 357 fenêtres), ordres on-chain (35 fenêtres, 1 sur 60), fills on-chain d'arcsine (78 527 fills, 15/10 → 24/10), calldata d'arcsine (64 157 transactions maker) (`WALLETS.md:135-141`). La validation d'arcsine ne peut donc être refaite sans re-télécharger ces données ; voir [`architecture-backtest.md`](../architecture-backtest.md) §7 et §8 pour l'impact sur la non-régression.

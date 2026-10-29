@@ -1,5 +1,7 @@
 # Contrats figés — migration btc5m-lag-sim → updown5m-lab (validés par l'utilisateur le 2026-10-27)
 
+**Historique.** Contrats et décisions de la migration, figés les 27 et 28/10/2026. L'état actuel du projet est décrit à la racine de `docs/` ; le contrat 3 (UI) est caduc (D11).
+
 Dépôt source (LECTURE SEULE) : `C:\dev\REA Projects\btc5m-lag-sim`. Dépôt cible : `C:\dev\REA Projects\updown5m-lab`.
 Spécification complète : `C:\dev\REA Projects\updown5m-lab\PROMPT-MIGRATION.md` (ne jamais la modifier).
 

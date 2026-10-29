@@ -2,7 +2,7 @@
 
 Ce fichier synthétise la sécurité de l'ancien engine (clé, garde réseau, garde-fous), les revues menées, les décisions sur le mode réel, l'incident du 2026-10-22 et le constat du 2026-10-27 sur `dublin-live`.
 
-Convention : chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule), cités `fichier:ligne`. `[à vérifier]` marque ce qui n'est pas établi. Voir aussi [engine-conception.md](engine-conception.md) (garde-fous dans la conception), [exploitation-deploiement.md](exploitation-deploiement.md) (serveurs), [journal-decisions.md](journal-decisions.md).
+Convention : chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule), cités `fichier:ligne`. `[à vérifier]` marque ce qui n'est pas établi. Voir aussi [engine-conception.md](engine-conception.md) (garde-fous dans la conception), [exploitation-deploiement.md](recherche/exploitation-deploiement.md) (serveurs), [journal-decisions.md](journal-decisions.md).
 
 ## 1. Règles absolues de la mission
 
@@ -115,21 +115,17 @@ Lecture : 3 ordres réels de 5 $ ont été passés puis suivis de refus pour ris
 - Dans la version antérieure à la purge (commit `7138fbc^`), `src/server/app.js:105-140` contient `startSession`, qui crée un `RealTrader`, l'arme (`t.arm({ sources, wallet, passphrase, limits })`) et écrit un événement `{k:'real', type:'armed'}` dans la session. Cette lecture (`git show 7138fbc^:src/server/app.js`) est cohérente avec un « trader réel armé » mais ne prouve pas à elle seule la version déployée.
 - Le principe de l'ancien trader réel : miroir du compte simulé « Réaliste », ordre au marché FAK, montant plafonné (`engine/01-audit.md:29-33` ; `docs/real-trading.md:26-31`).
 - Ce constat contredit les phrases « Aucun ordre réel n'a jamais été envoyé » (`TODO.md:227`) et « Aucun ordre réel n'a encore été essayé » (`docs/real-trading.md:76`), antérieures ou propres à d'autres périodes. Il ne se confond pas avec l'incident du 2026-10-22 (3 ordres FAK tués, session de l'engine Rust, trois jours plus tard). Le rapport entre les deux n'est pas établi `[à vérifier]`.
-- Le wallet de l'ancienne application est celui de l'utilisateur (`0x515A…610c`) ; le fichier du wallet chiffré se trouve sur le serveur (chemin `~/p10/wallet` mentionné par la session de migration). `data/wallets` n'est pas copié dans le dépôt cible (décision D9, [contrats-migration.md:189](contrats-migration.md)).
+- Le wallet de l'ancienne application est celui de l'utilisateur (`0x515A…610c`) ; le fichier du wallet chiffré se trouve sur le serveur (chemin `~/p10/wallet` mentionné par la session de migration). `data/wallets` n'est pas copié dans le dépôt cible (décision D9, [contrats-migration.md:189](migration/contrats-migration.md)).
 
-**Conséquence retenue** (décision D8, 2026-10-27, [contrats-migration.md:188](contrats-migration.md)) : sur dublin-live, arrêt propre (sell-only, attendre que les positions soient à plat) et confirmation nominative de l'utilisateur sur le wallet AVANT tout nettoyage. Aucun déploiement n'est autorisé sur dublin-live (voir §7).
+**Conséquence retenue** (décision D8, 2026-10-27, [contrats-migration.md:188](migration/contrats-migration.md)) : sur dublin-live, arrêt propre (sell-only, attendre que les positions soient à plat) et confirmation nominative de l'utilisateur sur le wallet AVANT tout nettoyage. Aucun déploiement n'est autorisé sur dublin-live (voir §7).
 
 ## 7. Garde-fous du dépôt cible `updown5m-lab`
 
 | Mesure | Détail | Source (dépôt cible) |
 | --- | --- | --- |
-| Jamais de déploiement sur dublin-live | `deploy/deploy.sh` refuse si la destination brute ou l'hôte résolu par `ssh -G` contient l'IP publique ou le nom de dublin-live | `deploy/deploy.sh:10-16` |
-| Jamais d'installation sur dublin-live | `deploy/setup.sh` refuse selon le nom d'hôte, puis selon l'IP publique lue par IMDSv2 (pas de réponse IMDS = non bloquant) | `deploy/setup.sh:7-11` |
-| Service durci et local | `NoNewPrivileges`, `ProtectSystem=strict`, écriture seulement dans `/var/lib/updown5m`, UI sur `127.0.0.1:8787` | `deploy/updown5m@.service:16-17, :24-33` |
-| Pas d'ordre depuis le tracing | L'objectif du tracer est l'enregistrement de flux ; aucune clé ni wallet n'est copié (D9) | `PROMPT-MIGRATION.md` (sections DOCS et contraintes) ; décision D9 |
-| Accès à l'UI par tunnel SSH | Aucune exposition publique | `PROMPT-MIGRATION.md:96` |
-
-L'authentification de l'UI du tracing est absente par choix (shortcut documenté dans les contrats : loopback + tunnel SSH, toute personne ayant un shell sur le serveur peut basculer une source) ; c'est acceptable pour un outil qui ne passe aucun ordre.
+| Jamais de déploiement sur dublin-live | `source-tracing/deploy/lib.sh` refuse une destination dont l'hôte résolu (`ssh -G`) est dublin-live (garde historique, l'instance est arrêtée) | `source-tracing/deploy/lib.sh:62-64` |
+| Service durci | `NoNewPrivileges`, `ProtectSystem=strict`, écriture seulement dans `/var/lib/updown5m` | `source-tracing/deploy/updown5m-tracing.service:17-20` |
+| Pas d'ordre depuis le tracing | L'enregistreur n'a ni clé ni wallet (D9) ; il n'écoute aucun port (plus d'UI depuis le 2026-10-28, D11) | décisions D9, D11 |
 
 ## 8. Points d'attention opérationnels
 

@@ -5,11 +5,11 @@
 - sur 59 695 ordres horodatés d'autres makers (35 fenêtres) : PnL prédit **16 581 $** pour 17 331 $ réels (**−4,3 %**), volume ×1,044, ordres exacts 84,1 % ;
 - sur 29 579 ordres réels d'arcsine : PnL prédit **16 645 $** pour 15 360 $ réels (**+8,4 %**), volume ×0,958, ordres exacts 71,0 % (`engine/maker-bt/WALLETS.md:14-19, 52-71`).
 
-Ces valeurs sont la **référence de non-régression** de la migration (re-mesurée le 2026-10-27, §6). Les résultats antérieurs de la phase 11 et des lots b01-b10 ont été produits avec des bornes biaisées : voir [`strategies-maker.md`](strategies-maker.md) et [`exploration-maker-b01-b10.md`](exploration-maker-b01-b10.md).
+Ces valeurs sont la **référence de non-régression** de la migration (re-mesurée le 2026-10-27, §6). Les résultats antérieurs de la phase 11 et des lots b01-b10 ont été produits avec des bornes biaisées : voir [`strategies-maker.md`](recherche/strategies-maker.md) et [`exploration-maker-b01-b10.md`](recherche/exploration-maker-b01-b10.md).
 
 Conventions. Chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule) ; `WALLETS.md` = `engine/maker-bt/WALLETS.md`, `sim.mjs` = `engine/maker-bt/sim.mjs`. Rien n'a jamais été envoyé en ordre maker réel (`engine/11-maker-polymarket.md:119`). `[à vérifier]` : non établi.
 
-Voir aussi : [`architecture-backtest.md`](architecture-backtest.md) (portage Rust, `SimVenue`, plan E1), [`wallets-arcsine-certova.md`](wallets-arcsine-certova.md), [`donnees-publiques.md`](donnees-publiques.md), [`contraintes-marche.md`](contraintes-marche.md), [`ordres-et-appariement.md`](ordres-et-appariement.md), [`sources-de-prix-et-flux.md`](sources-de-prix-et-flux.md), [`journal-decisions.md`](journal-decisions.md).
+Voir aussi : [`architecture-backtest.md`](architecture-backtest.md) (portage Rust, `SimVenue`, plan E1), [`wallets-arcsine-certova.md`](recherche/wallets-arcsine-certova.md), [`donnees-publiques.md`](recherche/donnees-publiques.md), [`contraintes-marche.md`](recherche/contraintes-marche.md), [`ordres-et-appariement.md`](recherche/ordres-et-appariement.md), [`sources-de-prix-et-flux.md`](recherche/sources-de-prix-et-flux.md), [`journal-decisions.md`](journal-decisions.md).
 
 ---
 
@@ -118,11 +118,11 @@ Par jour en borne exacte, réel / prédit : 15/10 356 / −93 ; 16/10 535 / 1 26
 | Comptés dans les PnL | depuis 2026-10-25 ; **absents de b01-b10 et G1-G4** | `WALLETS.md:24,130` ; `engine/11-maker-polymarket.md:106` | établi |
 | Éligibilité aux récompenses de liquidité (ancienneté 3,5 s) pour le crypto | non vérifiée | `engine/research_notes/Engine réel Polymarket BTC 5m/axe_C_strategies.md:151` | `[à vérifier]` |
 
-Détail des règles officielles : [`contraintes-marche.md`](contraintes-marche.md).
+Détail des règles officielles : [`contraintes-marche.md`](recherche/contraintes-marche.md).
 
 ## 6. Re-mesure du 2026-10-27 (référence de non-régression figée)
 
-Commande : `node --max-old-space-size=8192 engine/maker-bt/validate.mjs --delay 0 --sim exact`, durée 21 min 42 s ([conception-engine-migration.md:24-25](conception-engine-migration.md) ; bloc de sortie aussi dans [contrats-migration.md:144-156](contrats-migration.md)). Sortie de référence :
+Commande : `node --max-old-space-size=8192 engine/maker-bt/validate.mjs --delay 0 --sim exact`, durée 21 min 42 s ([conception-engine-migration.md:24-25](migration/conception-engine-migration.md) ; bloc de sortie aussi dans [contrats-migration.md:144-156](migration/contrats-migration.md)). Sortie de référence :
 
 ```
 simWindow on 59695 twins after the open with a known end (real 1089572 sh, PnL 17331 $):
@@ -142,7 +142,7 @@ La re-mesure **reproduit exactement** les valeurs de `WALLETS.md:52-62` (par jou
 - Les trades Binance BTCUSDT (spot et perpétuel, archives publiques `aggTrades`) remplacent OKX pour la juste valeur, avec une réception supposée **120 ms** après la bourse (`WALLETS.md:153-155` ; `binance-trades.mjs:1-4`).
 - Calibrée à **σ×1,3** : une probabilité de 0,93 donne 93 % observé, 0,48 donne 47-48 %, 0,02 donne 3-4 %, en début et milieu de fenêtre ; σ×1,0 est trop confiante, σ×1,6 pas assez (`WALLETS.md:155-157`).
 - La latence de 120 ms est **mesurée pour OKX vers Dublin, non vérifiée pour Binance** `[à vérifier]` (`:155`).
-- Raison du changement : le flux OKX enregistré était très creux (25 à 1 330 prix par fenêtre ; 25 à 100 du 16/10 22:00 au 18/10, un prix toutes les 7 à 27 s), donc la juste valeur fondée sur lui était périmée de plusieurs secondes (`:146-151`). Nuance : le flux brut OKX est dense (20-35 msg/s) et les sessions n'écrivent un `px` que quand le mid change ; la cause réelle de la rareté n'est pas établie `[à vérifier]` (voir [`sources-de-prix-et-flux.md`](sources-de-prix-et-flux.md)).
+- Raison du changement : le flux OKX enregistré était très creux (25 à 1 330 prix par fenêtre ; 25 à 100 du 16/10 22:00 au 18/10, un prix toutes les 7 à 27 s), donc la juste valeur fondée sur lui était périmée de plusieurs secondes (`:146-151`). Nuance : le flux brut OKX est dense (20-35 msg/s) et les sessions n'écrivent un `px` que quand le mid change ; la cause réelle de la rareté n'est pas établie `[à vérifier]` (voir [`sources-de-prix-et-flux.md`](recherche/sources-de-prix-et-flux.md)).
 
 ### 7.2 Autres calibrations
 

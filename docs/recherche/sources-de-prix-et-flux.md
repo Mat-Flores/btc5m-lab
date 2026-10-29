@@ -6,7 +6,7 @@
 
 **Lecture des citations.** Chemins relatifs au dépôt source `btc5m-lag-sim` (lecture seule). `E/` = `engine/` ; `RN/` = `engine/research_notes/Engine réel Polymarket BTC 5m/` ; `MB/` = `engine/maker-bt/`. `fichier:N-M` désigne des lignes. `[à vérifier]` : non établi ou contradictoire.
 
-**Renvois.** [ordres-et-appariement.md](ordres-et-appariement.md) · [donnees-publiques.md](donnees-publiques.md) · [simulateur-maker.md](simulateur-maker.md) · [exploration-maker-b01-b10.md](exploration-maker-b01-b10.md) · [engine-mesures-phases.md](engine-mesures-phases.md) · [architecture-backtest.md](architecture-backtest.md).
+**Renvois.** [ordres-et-appariement.md](ordres-et-appariement.md) · [donnees-publiques.md](donnees-publiques.md) · [simulateur-maker.md](../simulateur-maker.md) · [exploration-maker-b01-b10.md](exploration-maker-b01-b10.md) · [engine-mesures-phases.md](engine-mesures-phases.md) · [architecture-backtest.md](../architecture-backtest.md).
 
 ---
 
@@ -126,7 +126,7 @@ Choix de la source de prix (phase 0, décision laissée à l'utilisateur) : à d
 | Chainlink | **10 s** | Max hors coupure 8,9 s ; 68 trous > 3 s (max 8,8 s) en 18,7 h. Un trou de 5 à 10 s passe encore : seuil « à revoir en phase 9 » | `E/04-flux.md:41` ; `E/09-endurance.md:65` ; `E/08-strategies.md:217-219` |
 | OKX | **3 s** | Deux fois le maximum du SWAP (1,46 s) ; serré pour le spot (2,57 s) ; à recalibrer | `E/05-okx.md:79-82` |
 
-Le tracer de la migration reprend ces seuils comme `Caps.silence` (OKX 3 s, Polymarket 3 s, Chainlink 10 s). Source : [contrats-migration.md:48](contrats-migration.md) (contrat de trace validé le 2026-10-27).
+Le tracer de la migration reprend ces seuils comme `Caps.silence` (OKX 3 s, Polymarket 3 s, Chainlink 10 s). Source : [contrats-migration.md:48](../migration/contrats-migration.md) (contrat de trace validé le 2026-10-27).
 
 Principe : l'engine doit dater le **dernier message reçu** de chaque source, pas seulement le dernier changement de prix, sinon une coupure silencieuse ressemble à un marché calme. Source : `E/01-audit.md:268-270`.
 

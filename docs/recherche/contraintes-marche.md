@@ -13,7 +13,7 @@ Une citation `fichier:N` ou `fichier:N-M` désigne les lignes du fichier. Les li
 
 **Statuts.** *Établi* : texte du marché ou documentation officielle. *Mesuré* : mesure interne. *Calcul* : dérivé d'une formule sourcée. *Décision* : choix du projet. `[à vérifier]` : non établi ou contradictoire, avec les deux sources citées.
 
-**Renvois.** [ordres-et-appariement.md](ordres-et-appariement.md) (cycle de vie des ordres, taker delay en détail), [sources-de-prix-et-flux.md](sources-de-prix-et-flux.md) (flux), [donnees-publiques.md](donnees-publiques.md), [plateformes-et-conformite.md](plateformes-et-conformite.md), [simulateur-maker.md](simulateur-maker.md), [exploration-maker-b01-b10.md](exploration-maker-b01-b10.md), [strategies-maker.md](strategies-maker.md), [strategies-preneuses.md](strategies-preneuses.md), [wallets-arcsine-certova.md](wallets-arcsine-certova.md).
+**Renvois.** [ordres-et-appariement.md](ordres-et-appariement.md) (cycle de vie des ordres, taker delay en détail), [sources-de-prix-et-flux.md](sources-de-prix-et-flux.md) (flux), [donnees-publiques.md](donnees-publiques.md), [plateformes-et-conformite.md](plateformes-et-conformite.md), [simulateur-maker.md](../simulateur-maker.md), [exploration-maker-b01-b10.md](exploration-maker-b01-b10.md), [strategies-maker.md](strategies-maker.md), [strategies-preneuses.md](strategies-preneuses.md), [wallets-arcsine-certova.md](wallets-arcsine-certova.md).
 
 ---
 
@@ -237,7 +237,7 @@ Le détail est dans [plateformes-et-conformite.md](plateformes-et-conformite.md)
 
 **[à vérifier] PnL réel d'arcsine.** 15 360 $ (`MB/WALLETS.md:15` et `:66`) contre 16 383 $ « réels » dans la ligne sur la retenue (`MB/WALLETS.md:23` et `:71`). Les deux lignes ne sont pas réconciliées dans la source (jeux d'ordres différents ?).
 
-**Re-mesure du 2026-10-27 (phase de migration).** `validate.mjs --delay 0 --sim exact` (21 min 42 s) retrouve exactement `MB/WALLETS.md` §0 : 59 695 ordres, réel 1 089 572 parts / PnL 17 331 $ ; exact prédit 1 137 900 parts, ratio 1,044, ordres exacts 0,841, PnL 16 581 $ ; PnL par jour identique à `MB/WALLETS.md:62`. Étape intermédiaire : 71 049 ordres, 66 273 arrivées trouvées, ratio 1,102 ; 63 152 de fin connue, ratio 1,042 ; exacts 0,812. Source : [conception-engine-migration.md:24-25](conception-engine-migration.md) (rapport de conception de la phase 1 de la migration) ; référence figée dans [contrats-migration.md:144-156](contrats-migration.md). Cette valeur est la référence de non-régression (tolérance zéro) du portage Rust, voir [simulateur-maker.md](simulateur-maker.md).
+**Re-mesure du 2026-10-27 (phase de migration).** `validate.mjs --delay 0 --sim exact` (21 min 42 s) retrouve exactement `MB/WALLETS.md` §0 : 59 695 ordres, réel 1 089 572 parts / PnL 17 331 $ ; exact prédit 1 137 900 parts, ratio 1,044, ordres exacts 0,841, PnL 16 581 $ ; PnL par jour identique à `MB/WALLETS.md:62`. Étape intermédiaire : 71 049 ordres, 66 273 arrivées trouvées, ratio 1,102 ; 63 152 de fin connue, ratio 1,042 ; exacts 0,812. Source : [conception-engine-migration.md:24-25](../migration/conception-engine-migration.md) (rapport de conception de la phase 1 de la migration) ; référence figée dans [contrats-migration.md:144-156](../migration/contrats-migration.md). Cette valeur est la référence de non-régression (tolérance zéro) du portage Rust, voir [simulateur-maker.md](../simulateur-maker.md).
 
 ### 9.2 Spot Binance à la milliseconde, σ×1,3
 
