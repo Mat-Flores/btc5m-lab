@@ -227,5 +227,7 @@ export function myPosition(m, token) {
   }
   for (const t of m.trades) if (t.token === token && t.buy && !t.orderId && t.fillShares > 0) { sh += t.fillShares; usd += t.fillUsd; }
   const st = m.states.at(-1);
-  return { shares: num(st?.pos?.[token]) ?? sh, avg: sh ? usd / sh : null, mark: num(st?.marks?.[token]) };
+  // même repli que markets() : sans prix relevé, le dernier prix auquel il a traité
+  const lastPrice = [...m.trades].reverse().find((t) => t.token === token && t.price != null)?.price ?? null;
+  return { shares: num(st?.pos?.[token]) ?? sh, avg: sh ? usd / sh : null, mark: num(st?.marks?.[token]) ?? lastPrice };
 }

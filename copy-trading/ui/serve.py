@@ -157,7 +157,11 @@ def market_meta(rows, token):
     m = rows[0]
     ids, outs = json.loads(m.get("clobTokenIds") or "[]"), json.loads(m.get("outcomes") or "[]")
     outcome = outs[ids.index(token)] if token in ids and len(outs) == len(ids) else None
-    return {"question": m.get("question"), "title": m.get("groupItemTitle") or m.get("question"),
+    # « 52 » ou « Democratic Party » seuls ne disent rien : on les accole au titre de l'événement
+    event = ((m.get("events") or [{}])[0] or {}).get("title")
+    group = m.get("groupItemTitle")
+    title = f"{group} · {event}" if group and event else group or m.get("question")
+    return {"question": m.get("question"), "title": title,
             "outcome": outcome, "icon": m.get("icon"), "end": m.get("endDate"), "slug": m.get("slug")}
 
 

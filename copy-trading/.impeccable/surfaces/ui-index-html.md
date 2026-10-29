@@ -23,7 +23,7 @@ STORY : l'opérateur voit d'un coup d'œil si la copie suit (rendement, délai, 
 
 FIRST VIEWPORT : barre (wallet, mode, stratégie, santé, période) ; rangée haute : performance lui/moi avec l'écart grisé, quatre tuiles lui | moi | écart ; rangée basse : liste des marchés (280 px), centre (marché sélectionné : prix, ses fills, mes ordres, file ; cascade des décalages), droite (positions comparées, carnet avec nos niveaux, ma place dans la file).
 
-FORM : maquette validée par l'utilisateur, direction épinglée (pas de tirage retenu) ; seed: none (unavailable).
+FORM : un tirage a eu lieu (concept-seed, clé 59452a13 ; sa sortie n'a imprimé aucune ligne SEED REFERENCE) et sa donne (`.impeccable/mocks/decision/`) a été rejetée par l'utilisateur, qui a ensuite épinglé la direction (identité Polymarket, fusion lui/moi, graphique des décalages) ; maquette validée `.impeccable/mocks/fusion.html`. seed: none (unavailable)
 
 Signature : la cascade des décalages (échelle log 0 → 6 h, segments son match → ma détection → mon ordre → mon fill) liée par survol et clic au graphique de prix et à la liste.
 

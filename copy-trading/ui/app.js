@@ -39,13 +39,16 @@ function put(id, html) { if (last.get(id) !== html) { last.set(id, html); $(id).
 
 function render() {
   queued = false;
-  const t = now(), from = windowStart(M, UI.range, t);
+  // un clic en cours ne doit pas voir sa cible remplacée : on attend le relâchement
+  if (UI.pressing) return;
+  // les échelles avancent à la minute : un panneau n'est redessiné que si ses données changent
+  const live = now(), t = Math.ceil(live / 60e3) * 60e3, from = windowStart(M, UI.range, t);
   const mks = markets(M);
   if (!UI.pinned || !mks.some((k) => k.token === UI.token)) {
     // sans choix de l'opérateur, on suit le dernier marché où j'ai un ordre, sinon son dernier trade
     UI.token = (mks.find((k) => k.orders.length) || mks[0])?.token ?? null;
   }
-  nav(t);
+  nav(live);
   perf(from, t);
   topTiles(from, t);
   list(mks);
@@ -65,11 +68,13 @@ function nav(t) {
     : M.trades.some((x) => x.orderId != null) ? 'Maker' : M.trades.some((x) => x.fillShares != null) ? 'Taker' : 'Stratégie —';
   const fd = (name, label) => {
     const f = M.feed[name];
-    const cls = !f ? 'off' : f.health === 'Valid' ? '' : 'bad';
+    const cls = !f || stale ? 'off' : f.health === 'Valid' ? '' : 'bad';
     return `<span class="dot ${cls}" title="${esc(f ? f.health : 'aucune nouvelle')}"></span>${label}`;
   };
   const lat = tiles(M, windowStart(M, '1h', t)).delayMed;
   const age = M.last ? Math.max(0, Math.round((Date.now() - M.last) / 1000)) : null;
+  // plus de 2 min sans ligne de journal (le bot en écrit une par minute) : la santé affichée n'est plus actuelle
+  const stale = age != null && age > 120;
   const connBad = UI.conn !== 'ok';
   put('nav', `
     <div class="logo"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7" fill="#3262FF"/><path d="M7 18 L12 12 L16 15 L21 9" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="9" r="2" fill="#FF9900"/></svg>Copy-trading</div>
@@ -81,7 +86,7 @@ function nav(t) {
     ${M.halt ? `<span class="chip alert" title="${esc(M.halt.reason)}">Bot arrêté</span>` : ''}
     <span class="chip">${fd('chain', 'Chaîne')} <b>${lat == null ? '' : dur(lat)}</b> · ${fd('market', 'Market')} · <b>${M.checks.ok}</b> contrôles${M.checks.bad ? ` · <span class="dn">${M.checks.bad} écarts</span>` : ''}${M.resyncs ? ` · ${M.resyncs} resync` : ''}</span>
     <div class="tabs" role="group" aria-label="Période">${['1h', '6h', '1j', 'run'].map((k) => `<button data-range="${k}" aria-pressed="${UI.range === k}">${k === 'run' ? 'Run' : k.toUpperCase()}</button>`).join('')}</div>
-    <span class="clock">${age == null ? 'en attente' : age < 2 ? 'à l’instant' : `il y a ${dur(age)}`}</span>`);
+    ${stale ? `<span class="chip alert"><span class="dot bad"></span>Journal muet depuis ${dur(age)}</span>` : `<span class="clock">${age == null ? 'en attente' : age < 2 ? 'à l’instant' : `il y a ${dur(age)}`}</span>`}`);
 }
 
 // ---- performance ---------------------------------------------------------------------------------------------------
@@ -129,10 +134,10 @@ function topTiles(from) {
   const d = k.hisPct != null && k.myPct != null ? k.myPct - k.hisPct : null;
   tile('t-ret', 'Rendement', [pct(k.hisPct), usd(k.hisValue)], [pct(k.myPct), usd(k.myValue), k.myPct < 0 ? 'dn' : k.myPct > 0 ? 'up' : ''],
     d == null ? null : [`${sgn(d, (v) => N2.format(v))} pt d’écart`, d < 0 ? 'bad' : 'good']);
-  tile('t-delay', 'Délai de copie', [k.lastMatch ? hms(k.lastMatch) : null, 'son dernier match'], [k.delayMed == null ? null : `+${dur(k.delayMed)}`, k.delayP90 == null ? '' : `P90 ${dur(k.delayP90)}`],
+  tile('t-delay', 'Délai de copie', [k.lastMatch ? hms(k.lastMatch) : null, 'dernier match'], [k.delayMed == null ? null : `+${dur(k.delayMed)}`, k.delayP90 == null ? '' : `P90 ${dur(k.delayP90)}`],
     k.apiShare == null ? null : k.apiShare > 0 ? [`${N0.format(k.apiShare * 100)} % via secours API`, 'bad'] : ['100 % via la chaîne', 'good']);
   const dp = k.hisPrice != null ? (k.myPrice - k.hisPrice) * 100 : null;
-  tile('t-price', 'Prix d’entrée', [k.hisPrice == null ? null : cents(k.hisPrice), 'ses fills copiés'], [k.myPrice == null ? null : cents(k.myPrice), 'mes fills'],
+  tile('t-price', 'Prix d’entrée', [k.hisPrice == null ? null : cents(k.hisPrice), 'copiés'], [k.myPrice == null ? null : cents(k.myPrice), 'mes fills'],
     dp == null ? null : [`${sgn(dp, (v) => N1.format(v))}¢ d’écart`, dp > 0.05 ? 'bad' : 'good']);
   tile('t-exec', 'Exécution', [N0.format(k.hisFills), 'fills'], [`${k.filled} / ${k.posted}`, 'ordres remplis'],
     [`${k.open} en file${k.wrong ? ` · ${k.wrong} annulé${k.wrong > 1 ? 's' : ''} à tort` : ''}`, k.wrong ? 'bad' : 'neu']);
@@ -165,7 +170,7 @@ function list(mks) {
     const meta = EXT.meta.get(k.token);
     const hw = (hisPos(k.token) / (hisVal || 1)) / maxHis * 100, mw = (k.myValue / cap) / maxMe * 100;
     const bad = k.state.includes('tort');
-    return `<button class="mk" role="option" data-token="${esc(k.token)}" aria-current="${k.token === UI.token}">
+    return `<button class="mk" role="option" data-token="${esc(k.token)}" aria-selected="${k.token === UI.token}">
       ${icon(k.token)}
       <div style="min-width:0"><div class="q">${esc(meta?.title || `Marché ${k.token.slice(0, 6)}…${k.token.slice(-4)}`)}</div>
         <div class="bars" title="Sa part de son portefeuille / ma part du mien"><div class="bar"><b style="width:${hw.toFixed(1)}%;background:var(--him)"></b></div><div class="bar"><b style="width:${mw.toFixed(1)}%;background:var(--me)"></b></div></div></div>
@@ -200,6 +205,11 @@ function marketChart(from, t) {
   const top = 16, ph = 200, Y = (p) => top + (hi - p * 100) / (hi - lo) * ph;
   const grid = niceTicks(lo, hi, 4).map((v) => `<line x1="14" x2="${w - 56}" y1="${Y(v / 100)}" y2="${Y(v / 100)}" stroke="#2D3037"/><text x="${w - 50}" y="${Y(v / 100) + 4}" font-size="11" fill="#9AA0A9">${cents(v / 100)}</text>`).join('');
   const hl = hist.length > 1 ? `<polyline fill="none" stroke="#9AA0A9" stroke-width="1.5" points="${hist.map((p) => `${X(p.t * 1000).toFixed(1)},${Y(p.p).toFixed(1)}`).join(' ')}"/>` : '';
+  const bk = EXT.bookToken === tok && EXT.book && !EXT.book.error ? EXT.book : null;
+  const bestBid = bk ? Math.max(...(bk.bids || []).map((l) => +l.price)) : null, bestAsk = bk ? Math.min(...(bk.asks || []).map((l) => +l.price)) : null;
+  const band = bestBid > 0 && bestAsk < 1 && bestAsk > bestBid && bestAsk * 100 <= hi && bestBid * 100 >= lo
+    ? `<rect x="14" y="${Y(bestAsk)}" width="${w - 70}" height="${Y(bestBid) - Y(bestAsk)}" fill="rgba(255,255,255,.05)"/><text x="${w - 62}" y="${Y(bestAsk) - 5}" font-size="11" fill="#9AA0A9" text-anchor="end">carnet maintenant : ${cents(bestBid)} achat / ${cents(bestAsk)} vente</text>` : '';
+  const lastOrd = orders.at(-1);
   const ord = orders.map((o) => {
     const x0 = X(Math.max(o.posted, from)), x1 = X(o.end ?? t), y = Y(o.price) - 3;
     const open = o.status === 'open', cancel = o.status === 'cancel';
@@ -209,10 +219,13 @@ function marketChart(from, t) {
     const delay = trig?.lat?.src != null ? ` · +${dur((o.posted - trig.lat.src) / 1000)}` : '';
     return `<g${o.tx ? ` data-tx="${esc(o.tx)}"` : ''} class="pt"><line x1="${x0}" x2="${x1}" y1="${y}" y2="${y}" stroke="#5485FF" stroke-width="${open ? 2.5 : 3}" ${open || cancel ? 'stroke-dasharray="5 4"' : ''} opacity="${cancel ? 0.55 : 1}"/>
       ${o.posted >= from ? `<circle cx="${x0}" cy="${y}" r="5" fill="#0C0E13" stroke="#5485FF" stroke-width="2.5"/>` : ''}${fl}${endMark}
+      ${o === lastOrd ? `<text x="${Math.min(x0 + 8, w - 230)}" y="${y - 10}" font-size="11" font-weight="600" fill="#5485FF">${o.posted >= from ? `posé ${hm(o.posted)}${delay}` : 'mon ordre'} · ${shares(o.filled)} / ${shares(o.size)} rempli</text>` : ''}
       <title>Mon ordre ${o.buy ? 'd’achat' : 'de vente'} ${cents(o.price)} × ${shares(o.size)} · posé ${hms(o.posted)}${delay} · ${o.status === 'filled' ? 'rempli' : cancel ? `annulé (${o.cause || ''})${o.wrong ? ' à tort' : ''}` : `${shares(o.filled)} rempli, ${shares(o.ahead)} devant`}</title></g>`;
   }).join('');
   const maxUsd = Math.max(1, ...fills.map((f) => f.usd || 0));
   const dots = fills.map((f) => `<circle class="pt" data-tx="${esc(f.tx)}" cx="${X(f.at).toFixed(1)}" cy="${Y(f.price).toFixed(1)}" r="${(3 + 6 * Math.sqrt((f.usd || 0) / maxUsd)).toFixed(1)}" fill="${f.buy ? '#FF9900' : '#FFB547'}" stroke="#0C0E13" stroke-width="1.5"><title>Lui : ${f.buy ? 'achat' : 'vente'} ${cents(f.price)} · ${usd(f.usd)} · ${hms(f.at)}</title></circle>`).join('');
+  // mes copies prises sur le carnet (taker) : points bleus, comme mes fills d'ordres posés
+  const taken = fills.filter((f) => f.fillShares > 0 && f.orderId == null).map((f) => `<circle class="pt" data-tx="${esc(f.tx)}" cx="${X(f.at).toFixed(1)}" cy="${Y(f.fillUsd / f.fillShares).toFixed(1)}" r="5" fill="#3262FF" stroke="#0C0E13" stroke-width="1.5"><title>Mon fill ${shares(f.fillShares)} à ${cents(f.fillUsd / f.fillShares)} · ${hms(f.at)}</title></circle>`).join('');
   // la file devant mes ordres, relevée chaque minute
   const qs = orders.filter((o) => o.aheadSeries.length);
   const qmax = Math.max(1, ...qs.flatMap((o) => o.aheadSeries.map((a) => a[1])));
@@ -221,7 +234,7 @@ function marketChart(from, t) {
   const openO = qs.filter((o) => o.status === 'open').at(-1);
   const qlabel = openO ? `<text x="${w - 56}" y="312" font-size="11" fill="#B6BBC4" text-anchor="end">${shares(openO.ahead)} parts devant · −${shares(Math.max(0, (openO.ahead0 ?? 0) - (openO.ahead ?? 0)))} depuis la pose</text>` : '';
   const times = [0, 1, 2, 3].map((i) => from + (t - from) * i / 3).map((x, i) => `<text x="${X(x)}" y="${top + ph + 16}" font-size="11" fill="#9AA0A9" text-anchor="${i === 0 ? 'start' : i === 3 ? 'end' : 'middle'}">${hm(x)}</text>`).join('');
-  put('mchart', `<svg class="chart" width="${w}" height="${h}" role="img" aria-label="Prix du marché, ses fills et mes ordres">${grid}${hl}${ord}${dots}${times}
+  put('mchart', `<svg class="chart" width="${w}" height="${h}" role="img" aria-label="Prix du marché, ses fills et mes ordres">${grid}${band}${hl}${dots}${ord}${taken}${times}
     <line x1="14" x2="${w - 56}" y1="${top + ph + 28}" y2="${top + ph + 28}" stroke="#2D3037"/><text x="14" y="${top + ph + 46}" font-size="11" fill="#9AA0A9">File devant mes ordres</text>${qs.length ? queue : `<text x="14" y="${top + ph + 64}" font-size="11" fill="#9AA0A9">aucun ordre posé ici</text>`}${qlabel}</svg>`);
 }
 
@@ -244,11 +257,11 @@ function myText(t, c) {
 }
 function waterfall(from, t) {
   const wb = $('wbody');
-  // largeur de la colonne « décalage » : la grille de .wr (70 px | 30 % | reste | 27 %) moins le rembourrage
+  // largeur de la colonne « décalage » : la grille de .wr (70 px | 27 % | reste | 30 %) moins le rembourrage
   const inner = wb.clientWidth - 28;
-  const W = Math.max(160, inner - 70 - Math.max(180, inner * 0.3) - Math.max(170, inner * 0.27) - 10);
+  const W = Math.max(160, inner - 70 - Math.max(205, inner * 0.27) - Math.max(210, inner * 0.3) - 10);
   const ticks = [[0.1, '0'], [1, '1 s'], [10, '10 s'], [60, '1 min'], [3600, '1 h'], [21600, '6 h']];
-  put('whead', `<span>Heure</span><span>Lui</span><span>Décalage · son match → mon fill <span class="small">(échelle log)</span><div class="axis">${ticks.map(([s, l]) => `<span style="left:${logX(s, W).toFixed(0)}px">${l}</span>`).join('')}</div></span><span style="padding-left:14px">Moi</span>`);
+  put('whead', `<span>Heure</span><span>Lui</span><span title="Échelle logarithmique : son match → ma détection → mon ordre → mon fill">Décalage <span class="small">(log)</span><div class="axis">${ticks.map(([s, l]) => `<span style="left:${logX(s, W).toFixed(0)}px">${l}</span>`).join('')}</div></span><span style="padding-left:14px">Moi</span>`);
   const rows = M.trades.filter((x) => x.at >= from).slice(-80).reverse();
   if (!rows.length) return put('wbody', `<div class="empty">Aucun trade de lui sur la période. ${UI.range !== 'run' ? 'Élargis à <b>Run</b> pour tout voir.' : ''}</div>`);
   put('wbody', rows.map((x) => {
@@ -287,8 +300,8 @@ function side(t) {
   const hisSum = (k) => { const b = M.trades.filter((x) => x.token === k && x.buy); const v = b.reduce((a, x) => a + (x.usd || 0), 0); const hv = M.states.at(-1)?.his; return b.length ? `Ses achats ici pendant le run : ${usd(v)} en ${b.length} fills${hv ? ` (${N2.format(v / hv * 100)} % de son portefeuille)` : ''}.` : 'Pas d’achat de lui ici pendant le run.'; };
   put('cmp', `<h3>Position sur ce marché</h3>
     <div class="cr" style="border-top:0;color:var(--t3);font-size:12px"><span></span><span>Parts</span><span>Prix moyen</span><span>PnL</span></div>
-    <div class="cr"><span class="who h">Lui</span><span>${his ? shares(his.size) : loading()}</span><span>${his ? cents(his.avgPrice) : loading()}</span><span class="${his?.cashPnl < 0 ? 'dn' : 'up'}">${his ? sgn(his.cashPnl, usd) : loading()}</span></div>
-    <div class="cr"><span class="who m">Moi</span><span>${shares(me.shares)}</span><span>${cents(me.avg)}</span><span class="${meVal < 0 ? 'dn' : 'up'}">${meVal == null ? '—' : sgn(meVal, usd)}</span></div>
+    <div class="cr"><span class="who h">Lui</span><span>${his ? shares(his.size) : loading()}</span><span>${his ? cents(his.avgPrice) : loading()}</span><span class="${!his ? '' : his.cashPnl < 0 ? 'dn' : his.cashPnl > 0 ? 'up' : ''}">${his ? sgn(his.cashPnl, usd) : loading()}</span></div>
+    <div class="cr"><span class="who m">Moi</span><span>${shares(me.shares)}</span><span>${cents(me.avg)}</span><span class="${meVal < -0.005 ? 'dn' : meVal > 0.005 ? 'up' : ''}">${meVal == null ? '—' : sgn(meVal, usd)}</span></div>
     <div class="small" style="margin-top:8px">${hisSum(tok)}${his && me.avg != null && his.avgPrice ? ` Écart de prix moyen : ${sgn((me.avg - his.avgPrice) * 100, (v) => N1.format(v))}¢.` : ''}</div>`);
   const b = EXT.bookToken === tok ? EXT.book : null;
   const mine = [...M.orders.values()].filter((o) => o.token === tok && o.status === 'open');
@@ -335,6 +348,10 @@ function hoverFrom(el) {
   const token = el?.closest('[data-token]')?.dataset.token || (tx ? M.trades.find((x) => x.tx === tx)?.token : null) || null;
   return tx || token ? { tx, token } : null;
 }
+document.addEventListener('pointerdown', () => { UI.pressing = true; });
+document.addEventListener('pointerup', () => { UI.pressing = false; setTimeout(invalidate, 0); });
+document.addEventListener('focusin', (e) => { const h = hoverFrom(e.target); UI.hover = h; applyHover(); });
+document.addEventListener('focusout', () => { UI.hover = null; applyHover(); });
 document.addEventListener('mouseover', (e) => {
   const h = hoverFrom(e.target);
   if (JSON.stringify(h) !== JSON.stringify(UI.hover)) { UI.hover = h; applyHover(); }
