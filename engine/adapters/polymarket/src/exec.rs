@@ -74,6 +74,24 @@ pub fn order_request(host: &str, s: &Signer, c: &Creds, body: &str, ts_s: u64) -
         s.address, c.key, c.passphrase, body.len()).into_bytes())
 }
 
+/// `DELETE /order` with `{"orderID":…}`: cancels a resting order `[non vérifié sur ordre réel]`.
+pub fn cancel_request(host: &str, s: &Signer, c: &Creds, id: &str, ts_s: u64) -> Result<Vec<u8>, crate::sign::OrderError> {
+    let body = format!(r#"{{"orderID":"{id}"}}"#);
+    let sig = l2_signature(&c.secret, ts_s, "DELETE", "/order", &body)?;
+    Ok(format!("DELETE /order HTTP/1.1
+Host: {host}
+Content-Type: application/json
+POLY_ADDRESS: {}
+POLY_API_KEY: {}
+POLY_PASSPHRASE: {}
+POLY_SIGNATURE: {sig}
+POLY_TIMESTAMP: {ts_s}
+Content-Length: {}
+
+{body}",
+        s.address, c.key, c.passphrase, body.len()).into_bytes())
+}
+
 /// `POST /auth/api-key`: creates the account's API credentials (L1, signed by the EOA). Off the hot path, at arming.
 pub fn api_key_request(host: &str, s: &Signer, ts_s: u64) -> Vec<u8> {
     format!("POST /auth/api-key HTTP/1.1\r\nHost: {host}\r\n{}Content-Length: 0\r\n\r\n", s.l1_headers(ts_s)).into_bytes()

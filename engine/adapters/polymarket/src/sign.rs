@@ -114,9 +114,12 @@ impl Signer {
     pub fn order_hash(&self, o: &Order) -> String { format!("0x{}", hex::encode(keccak(&[&[0x19, 0x01], &self.exchange_domain, &self.contents(o)]))) }
 
     /// The `POST /order` body of a FAK order, field for field as the SDK writes it.
-    pub fn body(&self, o: &Order, owner: &str) -> String {
+    pub fn body(&self, o: &Order, owner: &str) -> String { self.body_typed(o, owner, "FAK") }
+
+    /// The same body for another order type (`GTC`: a resting limit order) `[GTC non vérifié sur ordre réel]`.
+    pub fn body_typed(&self, o: &Order, owner: &str, order_type: &str) -> String {
         let z = "0x0000000000000000000000000000000000000000000000000000000000000000";
-        format!(r#"{{"deferExec":false,"order":{{"builder":"{z}","expiration":"0","maker":"{w}","makerAmount":"{}","metadata":"{z}","salt":{},"side":"{}","signature":"{}","signatureType":{SIGNATURE_TYPE},"signer":"{w}","takerAmount":"{}","timestamp":"{}","tokenId":"{}"}},"orderType":"FAK","owner":"{owner}"}}"#,
+        format!(r#"{{"deferExec":false,"order":{{"builder":"{z}","expiration":"0","maker":"{w}","makerAmount":"{}","metadata":"{z}","salt":{},"side":"{}","signature":"{}","signatureType":{SIGNATURE_TYPE},"signer":"{w}","takerAmount":"{}","timestamp":"{}","tokenId":"{}"}},"orderType":"{order_type}","owner":"{owner}"}}"#,
             o.maker_amount, o.salt, if o.side == Side::Buy { "BUY" } else { "SELL" }, self.sign(o), o.taker_amount, o.timestamp_ms, o.token_id, w = self.wallet)
     }
 }

@@ -8,5 +8,6 @@
   "max_order_usd": 20.0,
   "max_slippage": 0.10,
   "rpc_ws": "wss://polygon-bor-rpc.publicnode.com",
-  "rpc_http": "https://polygon-bor-rpc.publicnode.com"
+  "rpc_http": "https://polygon-bor-rpc.publicnode.com",
+  "strategy": {"exec": "maker", "buy": "cumulative", "sell": "lots", "cancel_after_min": 360}
 }
