@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><title>Plan de métro de nuit</title>
+<style>
+:root{--n:#0E1A2B;--n2:#152438;--p:#EEF2F5;--p2:#AEB9C6;--rd:#F06A6E;--co:#5B8FFF;--am:#F2A93B;--gr:#3CC98A;--ln:#253750}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:var(--n);color:var(--p);font:13px/1.4 "Helvetica Neue",Arial,sans-serif;font-variant-numeric:tabular-nums}
+nav{height:46px;display:flex;align-items:center;gap:22px;padding:0 28px;border-bottom:1px solid var(--ln);color:var(--p2)}
+nav b{color:var(--p);font-size:15px}.tag{background:#2C5FD6;color:#fff;padding:2px 8px;font-size:12px;font-weight:700}.sp{margin-left:auto}
+.seg span{border:1px solid var(--ln);padding:4px 10px;margin-left:-1px}.seg .on{background:var(--p);color:var(--n)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.map{height:250px;border-bottom:1px solid var(--ln);position:relative;padding:18px 28px}
+.map h2{font-size:14px;color:var(--p2);font-weight:400}.map h2 b{color:var(--p);font-weight:600}
+.map svg{position:absolute;left:0;top:44px}
+.cols{display:grid;grid-template-columns:1fr 1fr;height:604px}
+.col{padding:18px 28px;display:grid;grid-template-rows:auto auto 1fr;gap:14px}.col+.col{border-left:1px solid var(--ln)}
+.hd{display:flex;align-items:center;gap:10px}.hd h3{font-size:20px;font-weight:600}.hd span{color:var(--p2)}
+.line{width:28px;height:6px;border-radius:3px}
+.figs{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--ln)}.figs div{background:var(--n2);padding:10px 14px;color:var(--p2);font-size:12px}
+.figs strong{display:block;color:var(--p);font-size:22px;font-weight:500}.up{color:var(--gr)!important}.dn{color:var(--rd)!important}
+table{width:100%;border-collapse:collapse}th{font-weight:400;font-size:12px;color:var(--p2);text-align:left;padding:6px 8px;border-bottom:1px solid var(--p2)}
+td{padding:7px 8px;border-bottom:1px solid var(--ln);white-space:nowrap}.mk{color:var(--p2);max-width:240px;overflow:hidden;text-overflow:ellipsis}
+.st{display:inline-block;width:9px;height:9px;border-radius:50%;border:2px solid currentColor;margin-right:6px;vertical-align:-1px}
+</style></head><body>
+<nav><b>copy-trading</b><span class="tag">PAPER</span><span>maker · cumul · lots · 6 h</span><span><span class="dot" style="background:var(--gr)"></span>chaîne 1,3 s</span><span><span class="dot" style="background:var(--gr)"></span>market</span><span>contrôles 328 / 0</span><span class="sp"></span><div class="seg"><span>1 h</span><span class="on">6 h</span><span>Run</span></div></nav>
+<section class="map">
+ <h2>Dernière copie · <b>ACHAT 0,70 · Sénat du Nebraska, Indépendant</b> · son match 16:26:04 → mon ordre posé 16:26:05,4</h2>
+ <svg width="1440" height="200" viewBox="0 0 1440 200">
+  <path d="M60 70 H520 L580 130 H1380" fill="none" stroke="#5B8FFF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M60 150 H340 L400 90 H520" fill="none" stroke="#F2A93B" stroke-width="8" stroke-linecap="round" opacity=".9"/>
+  <g font-size="13" fill="#EEF2F5">
+   <circle cx="60" cy="70" r="11" fill="#0E1A2B" stroke="#EEF2F5" stroke-width="4"/><text x="40" y="42">son match</text><text x="40" y="104" fill="#AEB9C6">16:26:04,0</text>
+   <circle cx="520" cy="70" r="11" fill="#0E1A2B" stroke="#EEF2F5" stroke-width="4"/><text x="470" y="42">observation (chaîne)</text>
+   <text x="250" y="62" fill="#F06A6E" font-weight="700">1 268 ms</text>
+   <circle cx="760" cy="130" r="9" fill="#0E1A2B" stroke="#EEF2F5" stroke-width="4"/><text x="730" y="164">décision</text><text x="636" y="122" fill="#AEB9C6">29 ms</text>
+   <circle cx="1060" cy="130" r="9" fill="#0E1A2B" stroke="#EEF2F5" stroke-width="4"/><text x="1020" y="164">ordre posé · file 9 860</text><text x="890" y="122" fill="#AEB9C6">paper : immédiat</text>
+   <circle cx="1380" cy="130" r="11" fill="#0E1A2B" stroke="#AEB9C6" stroke-width="4" stroke-dasharray="4 3"/><text x="1310" y="164" fill="#AEB9C6">fill · en attente</text>
+   <text x="60" y="186" fill="#F2A93B">ligne secours API (12:09 → 16:27) : +24 s médiane</text>
+  </g>
+ </svg>
+</section>
+<div class="cols">
+ <section class="col">
+  <div class="hd"><span class="line" style="background:var(--am)"></span><h3>Lui</h3><span>0xf031…c80c · teneur de marché</span></div>
+  <div class="figs"><div>Portefeuille<strong>4 981 400 $</strong></div><div>PnL latent<strong class="up">+38 214 $</strong></div><div>Fills / heure<strong>41</strong></div></div>
+  <table><tr><th>Ses ordres posés</th><th>Sens</th><th>Prix</th><th>Fills</th><th>Cumul</th><th>Dernier</th></tr>
+   <tr><td class="mk">Chambre · Démocrates (Non)</td><td>ACHAT</td><td>0,07</td><td>142</td><td>35 507 $</td><td>48 min</td></tr>
+   <tr><td class="mk">Sénat du Texas · Républicains</td><td>ACHAT</td><td>0,31</td><td>41</td><td>5 060 $</td><td>4 s</td></tr>
+   <tr><td class="mk">Oklahoma City, finale NBA</td><td>ACHAT</td><td>0,17</td><td>53</td><td>1 502 $</td><td>12 min</td></tr>
+   <tr><td class="mk">Oklahoma City, finale NBA</td><td class="dn">VENTE</td><td>0,18</td><td>9</td><td>81 $</td><td>12 min</td></tr>
+   <tr><td class="mk">Sénat du Nebraska · Indépendant</td><td>ACHAT</td><td>0,70</td><td>13</td><td>21 595 $</td><td>5 min</td></tr>
+   <tr><td class="mk">Balance : Sénat R, Chambre D</td><td>ACHAT</td><td>0,72</td><td>24</td><td>6 277 $</td><td>1 h 11</td></tr></table>
+ </section>
+ <section class="col">
+  <div class="hd"><span class="line" style="background:var(--co)"></span><h3>Moi</h3><span>100 $ de capital · 11 positions</span></div>
+  <div class="figs"><div>Réel<strong class="dn">−0,95 $</strong></div><div>Observé<strong class="up">+1,08 $</strong></div><div>Cash libre<strong>63,46 $</strong></div></div>
+  <table><tr><th>Mes ordres posés</th><th>Sens</th><th>Prix</th><th>Rempli</th><th>File devant</th><th>État</th></tr>
+   <tr><td class="mk">Chambre · Démocrates (Non)</td><td>ACHAT</td><td>0,07</td><td>0 / 42,57</td><td>18 400</td><td><span class="st" style="color:var(--am)"></span>en file</td></tr>
+   <tr><td class="mk">Sénat du Texas · Républicains</td><td>ACHAT</td><td>0,31</td><td>9,61 / 9,61</td><td>—</td><td><span class="st" style="color:var(--gr)"></span>rempli</td></tr>
+   <tr><td class="mk">Oklahoma City, finale NBA</td><td class="dn">VENTE</td><td>0,18</td><td>5 / 16,55</td><td>2 140</td><td><span class="st" style="color:var(--am)"></span>partiel</td></tr>
+   <tr><td class="mk">Sénat du Nebraska · Indépendant</td><td>ACHAT</td><td>0,70</td><td>0 / 5,07</td><td>9 860</td><td><span class="st" style="color:var(--am)"></span>en file</td></tr>
+   <tr><td class="mk">Républicains, 52 sièges</td><td>ACHAT</td><td>0,91</td><td>0 / 5,39</td><td>—</td><td class="dn"><span class="st"></span>annulé à tort</td></tr>
+   <tr><td class="mk">Balance : Sénat R, Chambre D</td><td>ACHAT</td><td>0,72</td><td>5 / 5</td><td>—</td><td><span class="st" style="color:var(--gr)"></span>rempli</td></tr></table>
+ </section>
+</div>
+</body></html>

@@ -3,3 +3,5 @@ config.json
 *.jsonl
 *.live-lock
 deploy/.env
+.impeccable/questions/
+.impeccable/hook.cache.json

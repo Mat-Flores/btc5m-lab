@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><title>Feuille de partie</title>
+<style>
+:root{--eb:#1B1A17;--eb2:#24221E;--ma:#ECE4D2;--ma2:#C9BFA9;--br:#C99A48;--rd:#E0645C;--gr:#7DBE8C;--ln:#3A372F}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:var(--eb);color:var(--ma);font:13px/1.4 "Helvetica Neue",Arial,sans-serif;font-variant-numeric:tabular-nums}
+nav{height:44px;display:flex;align-items:center;gap:24px;padding:0 28px;border-bottom:1px solid var(--ln);font-size:13px;color:var(--ma2)}
+nav b{color:var(--ma);font-size:15px}nav .pill{border:1px solid var(--br);color:var(--br);padding:2px 8px;font-size:12px}nav .sp{margin-left:auto}
+.tabs{display:flex}.tabs span{padding:4px 12px;border:1px solid var(--ln);font-size:12px}.tabs .on{background:var(--ma);color:var(--eb)}
+.clocks{display:grid;grid-template-columns:1fr 1fr;gap:2px;background:var(--ln);height:196px}
+.face{background:var(--eb2);padding:20px 28px;display:grid;grid-template-columns:1fr 200px;gap:24px}
+.face h2{font-size:14px;font-weight:600;color:var(--ma2);letter-spacing:.02em}
+.big{font-size:52px;font-weight:300;letter-spacing:-.03em;margin:6px 0 2px}.sub{color:var(--ma2)}.up{color:var(--gr)}.dn{color:var(--rd)}
+.dial{border:2px solid var(--br);border-radius:50%;width:150px;height:150px;position:relative;justify-self:end}
+.dial i{position:absolute;left:50%;top:50%;width:2px;height:62px;background:var(--ma);transform-origin:50% 100%;translate:-50% -100%}
+.dial span{position:absolute;bottom:30px;width:100%;text-align:center;font-size:12px;color:var(--ma2)}.dial strong{position:absolute;top:36px;width:100%;text-align:center;font-size:20px;font-weight:400}
+.face.me .dial{border-color:var(--ma2)}
+.body{display:grid;grid-template-columns:1fr 420px;height:660px}
+.sheet{padding:18px 28px;border-right:1px solid var(--ln)}
+h3{font-size:13px;font-weight:600;color:var(--br);margin-bottom:8px;display:flex;justify-content:space-between}h3 span{color:var(--ma2);font-weight:400}
+table{width:100%;border-collapse:collapse}th{font-weight:400;font-size:12px;color:var(--ma2);text-align:left;padding:6px 8px;border-bottom:1px solid var(--br)}
+td{padding:7px 8px;border-bottom:1px solid var(--ln);white-space:nowrap}td.n{color:var(--br);width:44px;text-align:right}
+td.mine{border-left:1px solid var(--ln)}.k{font-weight:600}.mk{color:var(--ma2);max-width:230px;overflow:hidden;text-overflow:ellipsis}
+tr.live td{background:#2E2A22}
+aside{padding:18px 24px;display:grid;gap:20px;align-content:start}
+.pos td{font-size:13px}.pos td:last-child{text-align:right}
+.lat{display:grid;grid-template-columns:150px 1fr 60px;gap:6px 10px;align-items:center;font-size:12px;color:var(--ma2)}
+.bar{height:6px;background:var(--ln)}.bar b{display:block;height:6px;background:var(--br)}
+</style></head><body>
+<nav><b>copy-trading</b><span class="pill">PAPER</span><span>maker · cumul · lots · 6 h</span><span>chaîne 1,3 s · market ok · contrôles 328/0</span><span class="sp"></span><div class="tabs"><span>1 h</span><span class="on">6 h</span><span>Run</span></div></nav>
+<section class="clocks">
+ <div class="face"><div><h2>LUI · 0xf031…c80c</h2><div class="big">4 981 400 $</div><div class="sub">PnL latent <span class="up">+38 214 $</span> · 795 positions · 41 fills / h</div><div class="sub" style="margin-top:14px">dernier coup 16:27:51 · ACHAT 0,31 Sénat du Texas</div></div>
+  <div class="dial"><i style="rotate:28deg"></i><strong>41</strong><span>fills / heure</span></div></div>
+ <div class="face me"><div><h2>MOI · 100 $ de capital</h2><div class="big dn">−0,95 $</div><div class="sub">observé <span class="up">+1,08</span> · demandé −0,95 · réel −0,95 · cash 63,46 $</div><div class="sub" style="margin-top:14px">ma réponse 16:27:52 · file à 0,31 : 3 180 devant moi</div></div>
+  <div class="dial"><i style="rotate:-62deg;background:var(--br)"></i><strong>1,3 s</strong><span>retard médian</span></div></div>
+</section>
+<div class="body">
+ <section class="sheet">
+  <h3>Feuille de partie <span>son coup · ma réponse</span></h3>
+  <table><tr><th></th><th>Son coup</th><th>Marché</th><th>Prix</th><th>$</th><th>Ma réponse</th><th>Délai</th></tr>
+  <tr class="live"><td class="n">474.</td><td class="k">ACHAT</td><td class="mk">Sénat du Texas · Républicains</td><td>0,31</td><td>9,30</td><td class="mine">file 3 210 → 3 180</td><td>+1,3 s</td></tr>
+  <tr><td class="n">473.</td><td class="k">ACHAT</td><td class="mk">Sénat du Nebraska · Indépendant</td><td>0,70</td><td>70,00</td><td class="mine k">pose 0,70 × 5,07</td><td>+1,4 s</td></tr>
+  <tr><td class="n">472.</td><td class="k">ACHAT</td><td class="mk">Spurs, finale NBA 2027</td><td>0,21</td><td>6,20</td><td class="mine mk">— engagement atteint</td><td></td></tr>
+  <tr><td class="n">471.</td><td class="k dn">VENTE</td><td class="mk">Oklahoma City, finale NBA 2027</td><td>0,18</td><td>9,30</td><td class="mine k">vend 5,00 à 0,18 <span class="up">+0,05</span></td><td>+1,2 s</td></tr>
+  <tr><td class="n">470.</td><td class="k">ACHAT</td><td class="mk">Chambre · Démocrates (Non)</td><td>0,07</td><td>3,00</td><td class="mine">file 18 460 → 18 400</td><td class="dn">+24 s API</td></tr>
+  <tr><td class="n">469.</td><td class="k">ACHAT</td><td class="mk">Républicains, 52 sièges au Sénat</td><td>0,911</td><td>6 173,16</td><td class="mine k">pose 0,91 × 5,39</td><td>+1,6 s</td></tr>
+  <tr><td class="n">468.</td><td class="k">ACHAT</td><td class="mk">Balance : Sénat R, Chambre R</td><td>0,06</td><td>63,83</td><td class="mine k">pose 0,06 × 49,66</td><td>+1,5 s</td></tr>
+  <tr><td class="n">467.</td><td class="k">ACHAT</td><td class="mk">Spurs, finale NBA 2027</td><td>0,21</td><td>51,79</td><td class="mine k">pose 0,21 × 14,19</td><td>+1,3 s</td></tr>
+  <tr><td class="n">466.</td><td class="k dn">VENTE</td><td class="mk">Oklahoma City, finale NBA 2027</td><td>0,18</td><td>18,00</td><td class="mine mk">— en attente d'un lot</td><td></td></tr>
+  <tr><td class="n">465.</td><td class="k">ACHAT</td><td class="mk">Sénat du Texas · Démocrates</td><td>0,30</td><td>86,96</td><td class="mine k">pose 0,30 × 9,93</td><td>+1,2 s</td></tr>
+  <tr><td class="n">464.</td><td class="k">ACHAT</td><td class="mk">Sénat du Texas · Républicains</td><td>0,31</td><td>561,10</td><td class="mine k">pose 0,31 × 9,61</td><td>+1,4 s</td></tr>
+  </table>
+ </section>
+ <aside>
+  <div><h3>Mes ordres posés <span>4</span></h3><table class="pos">
+   <tr><td>Chambre · Non</td><td>ACHAT 0,07</td><td>0 / 42,57</td><td>file 18 400</td></tr>
+   <tr><td>Oklahoma City</td><td>VENTE 0,18</td><td>5 / 16,55</td><td>file 2 140</td></tr>
+   <tr><td>Nebraska · Ind.</td><td>ACHAT 0,70</td><td>0 / 5,07</td><td>file 9 860</td></tr>
+   <tr><td>52 sièges R</td><td class="dn">annulé à tort</td><td></td><td>après 6 h 04</td></tr></table></div>
+  <div><h3>Latence <span>médiane · son match → mon fill</span></h3><div class="lat">
+   <span>match → observation</span><div class="bar"><b style="width:62%"></b></div><span>1 268</span>
+   <span>observation → décision</span><div class="bar"><b style="width:3%"></b></div><span>29</span>
+   <span>décision → pose</span><div class="bar"><b style="width:0"></b></div><span>NULL</span>
+   <span>pose → fill</span><div class="bar"><b style="width:0"></b></div><span>NULL</span></div></div>
+ </aside>
+</div>
+</body></html>

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><title>Standard</title>
+<style>
+:root{--bg:#0B0E11;--p:#161A1E;--ln:#2B3139;--t:#E6E8EA;--m:#9AA3AD;--g:#0ECB81;--r:#F6465D;--y:#F0B90B}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--t);font:13px/1.4 -apple-system,"Segoe UI",Arial,sans-serif;font-variant-numeric:tabular-nums}
+nav{height:48px;background:var(--p);display:flex;align-items:center;gap:20px;padding:0 20px;border-bottom:1px solid var(--ln);color:var(--m)}
+nav b{color:var(--y);font-size:15px}.sp{margin-left:auto}.btn{border:1px solid var(--ln);padding:4px 10px;color:var(--t)}.btn.on{background:var(--ln)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}
+.panel{background:var(--p);border:1px solid var(--ln);border-radius:6px;padding:14px 16px}
+.panel h3{font-size:13px;color:var(--m);font-weight:500;margin-bottom:10px;display:flex;justify-content:space-between}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kpis div{color:var(--m);font-size:12px}.kpis strong{display:block;color:var(--t);font-size:20px;font-weight:600}
+.g{color:var(--g)!important}.r{color:var(--r)!important}
+svg{display:block}
+table{width:100%;border-collapse:collapse}th{text-align:left;color:var(--m);font-weight:400;font-size:12px;padding:5px 6px;border-bottom:1px solid var(--ln)}td{padding:6px;border-bottom:1px solid var(--ln);white-space:nowrap}
+.mk{max-width:230px;overflow:hidden;text-overflow:ellipsis}
+</style></head><body>
+<nav><b>copy-trading</b><span class="btn">PAPER</span><span>maker · cumul · lots · 6 h</span><span class="g">● chaîne 1,3 s</span><span class="g">● market</span><span class="sp"></span><span class="btn">1 h</span><span class="btn on">6 h</span><span class="btn">Run</span></nav>
+<div class="grid">
+ <div class="panel"><h3>Wallet suivi <span>0xf031…c80c</span></h3><div class="kpis"><div>Portefeuille<strong>4 981 400 $</strong></div><div>PnL latent<strong class="g">+38 214 $</strong></div><div>Positions<strong>795</strong></div><div>Fills / h<strong>41</strong></div></div>
+  <svg width="664" height="120" viewBox="0 0 664 120"><polyline fill="none" stroke="#F0B90B" stroke-width="2" points="0,60 60,58 120,64 180,70 240,74 300,96 340,92 400,84 460,64 520,60 600,52 664,48"/></svg></div>
+ <div class="panel"><h3>Mon compte <span>100 $ de capital</span></h3><div class="kpis"><div>Réel<strong class="r">−0,95 $</strong></div><div>Observé<strong class="g">+1,08 $</strong></div><div>Demandé<strong class="r">−0,95 $</strong></div><div>Cash libre<strong>63,46 $</strong></div></div>
+  <svg width="664" height="120" viewBox="0 0 664 120"><polyline fill="none" stroke="#0ECB81" stroke-width="2" points="0,60 80,56 160,50 240,48 320,66 380,70 440,56 520,42 600,40 664,38"/><polyline fill="none" stroke="#F6465D" stroke-width="2" points="0,60 80,66 160,70 240,74 320,90 380,96 440,86 520,80 600,76 664,78"/></svg></div>
+ <div class="panel"><h3>Ses ordres posés <span>déduits</span></h3><table><tr><th>Marché</th><th>Sens</th><th>Prix</th><th>Fills</th><th>Cumul</th></tr>
+  <tr><td class="mk">Chambre · Démocrates (Non)</td><td class="g">ACHAT</td><td>0,07</td><td>142</td><td>35 507 $</td></tr>
+  <tr><td class="mk">Sénat du Texas · Républicains</td><td class="g">ACHAT</td><td>0,31</td><td>41</td><td>5 060 $</td></tr>
+  <tr><td class="mk">Oklahoma City, finale NBA</td><td class="g">ACHAT</td><td>0,17</td><td>53</td><td>1 502 $</td></tr>
+  <tr><td class="mk">Oklahoma City, finale NBA</td><td class="r">VENTE</td><td>0,18</td><td>9</td><td>81 $</td></tr>
+  <tr><td class="mk">Sénat du Nebraska · Indépendant</td><td class="g">ACHAT</td><td>0,70</td><td>13</td><td>21 595 $</td></tr></table></div>
+ <div class="panel"><h3>Mes ordres posés <span>4 ouverts</span></h3><table><tr><th>Marché</th><th>Sens</th><th>Prix</th><th>Rempli</th><th>File</th></tr>
+  <tr><td class="mk">Chambre · Démocrates (Non)</td><td class="g">ACHAT</td><td>0,07</td><td>0 / 42,57</td><td>18 400</td></tr>
+  <tr><td class="mk">Oklahoma City, finale NBA</td><td class="r">VENTE</td><td>0,18</td><td>5 / 16,55</td><td>2 140</td></tr>
+  <tr><td class="mk">Sénat du Nebraska · Indépendant</td><td class="g">ACHAT</td><td>0,70</td><td>0 / 5,07</td><td>9 860</td></tr>
+  <tr><td class="mk">Républicains, 52 sièges</td><td class="g">ACHAT</td><td>0,91</td><td>0 / 5,39</td><td class="r">annulé à tort</td></tr></table></div>
+ <div class="panel" style="grid-column:1/-1"><h3>Activité <span>son trade → ma réponse</span></h3><table><tr><th>Heure</th><th>Lui</th><th>Marché</th><th>Moi</th><th>Délai</th></tr>
+  <tr><td>16:27:51</td><td class="g">ACHAT 0,31 · 9,30 $</td><td class="mk">Sénat du Texas</td><td>file 3 210 → 3 180</td><td>1,3 s</td></tr>
+  <tr><td>16:26:04</td><td class="g">ACHAT 0,70 · 70,00 $</td><td class="mk">Nebraska</td><td>posé 0,70 × 5,07</td><td>1,4 s</td></tr>
+  <tr><td>16:19:09</td><td class="r">VENTE 0,18 · 9,30 $</td><td class="mk">Oklahoma City</td><td>rempli vente 5,00 à 0,18</td><td>1,2 s</td></tr></table></div>
+</div>
+</body></html>
