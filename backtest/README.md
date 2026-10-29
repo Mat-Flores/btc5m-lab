@@ -9,7 +9,7 @@ Rust ne tourne que dans WSL `Ubuntu-24.04`. Depuis Git Bash, préfixer les appel
 | Commande | Rôle |
 |---|---|
 | `scripts/test-wsl.sh [engine\|backtest]` | tests de l'engine (workspace) puis du backtest |
-| `scripts/validate-wsl.sh` | non-régression du simulateur maker : `backtest validate` sur les ordres réels, comparé bit à bit à l'oracle Node (`oracle/validate-export.mjs`) |
+| `scripts/validate-wsl.sh` | non-régression du simulateur maker (surcharge `config/nonreg.json` : `cancel_ahead_factor` 1, le comportement validé) : `backtest validate` sur les ordres réels, comparé bit à bit à l'oracle Node (`oracle/validate-export.mjs`) |
 | `scripts/batch-wsl.sh <lot>` | non-régression sur un lot de l'ancien dépôt (`x01-retest-exact`, `x04-mix-frozen`…), comparé à l'oracle Node (`oracle/batch-export.mjs`) |
 | `backtest run --config config/default.json [--override f.json]... [--batch lot.json] [--windows a,b] [--export x.jsonl]` | un backtest |
 | `backtest validate [--override …] [--export x.jsonl]` | rejoue les ordres réels des makers tiers (validation du modèle de fill) |
@@ -30,9 +30,9 @@ Vérifications du mode trace :
 Limites du mode trace (mesurées le 2026-10-28) :
 - **Horloge des anciennes sessions** : l'ancien moteur corrigeait ses instants par le décalage d'horloge enregistré (`clock`, jusqu'à −1,3 s sur le portable). L'engine n'a pas cette entrée (horloge synchronisée en live). Sur la session ci-dessus, `replay` donne 3 ordres, l'engine 2 ; `replay` sans les lignes `clock` donne exactement les 2 de l'engine.
 - **Borne `exact`** : elle a besoin des trades. Les anciens enregistrements Node n'en ont pas : seuls les asks qui croisent notre bid remplissent. Les traces courantes ont les `last_trade_price` ; leur appariement aux deltas est `[à vérifier]`.
-- **Tick 0,001** : quand la stratégie maker passe au tick de 0,001 (niveaux à 3 décimales, comme `sim.mjs`), l'engine refuse l'ordre, car le tick de la fenêtre reste à 0,01 (`engine/app/src/engine.rs`, `amounts`). Refus comptés et listés à la fin du run.
+- **Tick du marché** : l'engine suit le tick annoncé par le flux (`tick_size_change`, tick d'un instantané) ; sur les anciennes traces qui ne le gardaient pas, un niveau hors de la grille fait passer la fenêtre au tick de 0,001 (le marché acceptait ce prix ; règle de `sim.mjs`).
 - **Couverture** : Binance n'est enregistré que les 14→17/10 et 26→28/10. Le signal par défaut (binance-spot) n'existe pas les autres jours : la stratégie ne cote pas.
-- **Résultats officiels** : les traces courantes du 28/10 n'en ont aucun (le traceur cessait d'interroger gamma 120 s après la fin d'une fenêtre, le résultat arrive ≈ 5 min après) : aucun marché n'y est réglé. Corrigé dans `source-tracing` (900 s), effectif au prochain déploiement.
+- **Résultats officiels** : les traces courantes du 28/10 n'en ont aucun (le traceur cessait d'interroger gamma 120 s après la fin d'une fenêtre, le résultat arrive ≈ 5 min après) : aucun marché n'y est réglé. Traceur corrigé et redéployé le 2026-10-28 (900 s).
 - **Gamma interrogé toutes les 10 s** : chaque fenêtre et chaque résultat ne sont donnés qu'une fois à l'engine.
 - **Fichiers d'un hôte secondaire** (`<jour>.<hôte>.old.jsonl.gz`, D5) : ignorés, seul le fichier canonique du jour est lu.
 
@@ -67,7 +67,7 @@ Limites du mode trace (mesurées le 2026-10-28) :
 | `venue.fill_bound` | `exact` | — | `exact`, `prudent`, `optimistic` ([`simulateur-maker.md`](../docs/simulateur-maker.md) §2) |
 | `venue.fill_lookback_ms` | 0 | ms | un fill daté `ts` vient d'un ordre preneur envoyé à `ts −` ceci ; 0 recommandé (`WALLETS.md:123`) |
 | `venue.cancel_queue` | `pro_rata` | — | une annulation au niveau amincit la file devant nous au prorata ; `behind` : jamais |
-| `venue.cancel_ahead_factor` | 1 | 0 à 1 | part du prorata appliquée (E1) ; **0,5 recommandé** (volume de contrôle 1,052 → 1,006) |
+| `venue.cancel_ahead_factor` | 0,5 | 0 à 1 | part du prorata appliquée (E1) : 0,5 est la valeur mesurée la plus proche du réel (volume de contrôle 1,052 → 1,006) ; 1 = comportement de l'ancien simulateur (`config/nonreg.json`) |
 | `venue.post_only_cross_check` | `decision` | — | un post-only qui croiserait est refusé à la décision ; `arrival` non implémenté |
 | `venue.silence_ms` | 3000 | ms | carnet silencieux plus longtemps : aucun fill |
 | `venue.trading_cutoff_ms_after_end` | 2000 | ms | aucun fill au-delà de la fin + ceci `[aucune règle documentée]` |

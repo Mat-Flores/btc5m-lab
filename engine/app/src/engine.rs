@@ -113,6 +113,7 @@ impl Engine {
                 self.book_changes.clear();
                 let src = e.source as usize;
                 if let Some(books) = self.books.get_mut(src).and_then(|b| b.as_mut()) { apply(books, &e, &mut self.book_changes); }
+                follow_tick(&mut self.windows, &e);
                 for i in 0..self.strategies.len() {
                     let books = if self.used.get(src) == Some(&true) { self.books[src].as_ref() } else { None };
                     let name = self.sources.get(src).map_or("", |s| s.as_str());
@@ -170,6 +171,25 @@ fn apply(books: &mut Books, e: &Event, changes: &mut Vec<(String, Result<(), Int
         Payload::BookSnapshot { asset, bids, asks, tick } => { let r = books.snapshot(asset, bids, asks, *tick); changes.push((asset.clone(), r)); }
         Payload::BookDelta { changes: c } => for (asset, why) in books.delta(e.event_ms.unwrap_or(0), c, e.recv.mono_ns) { changes.push((asset, Err(why))); },
         Payload::TickChange { asset, tick } => { books.tick_changed(asset, *tick); changes.push((asset.clone(), Err(Integrity::TickChanged))); }
+        _ => {}
+    }
+}
+
+/// Finest tick Polymarket uses (prices near 0 or 1).
+const FINE_TICK: Micro = 1_000;
+
+/// A market's tick follows the venue: `tick_size_change`, or the tick a snapshot gives. A recording that did not keep
+/// them shows a level off the window's grid: the venue accepted that price, so the tick is the fine one (sim.mjs:117,123).
+fn follow_tick(windows: &mut [Window], e: &Event) {
+    let mut set = |asset: &str, tick: Option<Micro>, price: Micro| {
+        for w in windows.iter_mut().filter(|w| w.tokens.iter().any(|t| t == asset)) {
+            match tick { Some(t) => w.tick = t, None => if w.tick > FINE_TICK && price % w.tick != 0 { w.tick = FINE_TICK } }
+        }
+    };
+    match &e.payload {
+        Payload::TickChange { asset, tick } | Payload::BookSnapshot { asset, tick: Some(tick), .. } => set(asset, Some(*tick), 0),
+        Payload::BookSnapshot { asset, bids, asks, tick: None } => for l in bids.iter().chain(asks) { set(asset, None, l.price) },
+        Payload::BookDelta { changes } => for c in changes { set(&c.asset, None, c.price) },
         _ => {}
     }
 }
@@ -232,6 +252,23 @@ mod tests {
         assert_eq!(out, vec![Command::Cancel { n: 0 }]);
         e.on(EngineInput::Venue(VenueEvent::Closed { n: 7 }), AT, &mut out); // not an order of ours: nobody is told
         assert_eq!(out.len(), 1);
+    }
+
+    /// The window's tick follows the venue: an order at 0.137 is refused at 0.01, taken once the market is at 0.001.
+    #[test]
+    fn window_tick_follows_the_venue() {
+        let ev = |payload| Event { source: 0, recv: AT, event_ms: None, seq: None, payload };
+        let bid = |p| Decision::Place(Intent { tif: Tif::Gtc, amount: Amount::Shares(10_000_000), limit: p, post_only: true, ..intent(1, "up") });
+        let mut ws = vec![window()];
+        follow_tick(&mut ws, &ev(Payload::BookDelta { changes: vec![engine_core::event::Change { asset: "up".into(), side: engine_core::event::Side::Bid, price: 450_000, size: 1, best_bid: None, best_ask: None }] }));
+        assert_eq!(ws[0].tick, 10_000);
+        follow_tick(&mut ws, &ev(Payload::BookDelta { changes: vec![engine_core::event::Change { asset: "down".into(), side: engine_core::event::Side::Bid, price: 963_000, size: 1, best_bid: None, best_ask: None }] }));
+        assert_eq!(ws[0].tick, FINE_TICK, "a level off the grid: the market is at 0.001");
+        follow_tick(&mut ws, &ev(Payload::TickChange { asset: "up".into(), tick: 10_000 }));
+        assert_eq!(ws[0].tick, 10_000, "the venue said so");
+        let Decision::Place(i) = bid(137_000) else { unreachable!() };
+        assert!(amounts(&i, ws[0].tick).is_err());
+        assert!(amounts(&i, FINE_TICK).is_ok());
     }
 
     #[test]

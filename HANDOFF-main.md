@@ -13,11 +13,11 @@
 - docs/ restructuré : racine = projet, `recherche/`, `migration/`, `pistes-ecartees.md`, 0 lien cassé.
 
 ## Reste à faire
-1. Redéployer le traceur (`source-tracing/deploy/start`) pour `gamma_prev_grace_s` = 900 : sans cela les traces courantes n'ont aucun résultat officiel (backtest sans règlement).
+1. Vérifier qu'un `pull` du 29/10 ramène des lignes `http` gamma avec `"closed":true` (traceur redéployé le 28/10 avec `gamma_prev_grace_s` 900).
 2. `pull` quotidien (≈ 4 Go/jour, 25 Go libres sur le serveur).
-3. Idée non décidée : PnL des fenêtres « choc » avec/sans `no_knife`, `max_diverge`, `max_imbalance`, `Move`, puis éventuelle pause sur calendrier macro (TOML `macro_calendar`…), validée en walk-forward + Monte Carlo.
-4. Écart engine connu : tick 0,001 refusé (tick de la fenêtre figé, `engine/app/src/engine.rs` `amounts`) ; à décider avant tout backtest maker sur traces.
-5. Décider : `cancel_ahead_factor` 0,5 par défaut ? `source-tracing/convert-report.json` à commiter ou ignorer ?
+3. Idée non décidée : PnL des fenêtres « choc » avec/sans `no_knife`, `max_diverge`, `max_imbalance`, `Move`, puis éventuelle pause sur calendrier macro, validée en walk-forward + Monte Carlo.
+
+FAIT aussi le 28/10 (4e demande) : engine suit le tick du marché (`follow_tick`, plus de refus à 0,001) ; `cancel_ahead_factor` 0,5 par défaut, non-régression via `config/nonreg.json` (0 écart revérifié) ; `convert-report.json` et `deploy/` vide supprimés.
 
 ## Décisions et pièges
 - `copy-trading/` : projet isolé de l'utilisateur, ne jamais le lire ni le commiter ; commiter avec `git commit -- <chemins>` (l'utilisateur stage lui-même). Exclu de graphify (`graphify-out/.graphify_build.json`).

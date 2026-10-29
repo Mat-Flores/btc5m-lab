@@ -148,7 +148,7 @@ Tous les paramètres sont lus du fichier de config (§6) ; aucun n'est codé en 
 | `fill_bound` | `exact` | recommandation `WALLETS.md:123` | choix de modèle validé sur ordres réels |
 | `fill_lookback_ms` | **0** (obligatoire) | le défaut de `sim.mjs:166` est 150 ms (`opts.delay ?? 0.15`) ; `WALLETS.md:123` recommande 0 avec la borne `exact` ; avec 150 ms le PnL prédit tombe à 7 943 $ pour 16 383 $ réels (−52 %) (`WALLETS.md:71`) | établi sur arcsine (poses non retenues) ; annulations indécidables `[à vérifier]` |
 | `cancel_queue` | `pro_rata` ; option `behind` (toutes les annulations derrière nous) | `sim.mjs:154` ; volume prédit 1,04 (prorata) / 0,94 (derrière) / 1,09 (devant) du réel (`WALLETS.md:40`) | réalité entre prorata et « derrière » : voir `cancel_ahead_factor` |
-| `cancel_ahead_factor` | 1 (prorata entier, validé) ; recommandé 0,5 | E1, mesuré le 2026-10-28 : volume de contrôle 1,052 → 1,006 avec 0,5 ([`simulateur-maker.md`](simulateur-maker.md) §10.2) | part de la réduction prorata appliquée à la file devant nous ; sans effet avec `behind` |
+| `cancel_ahead_factor` | 0,5 (défaut depuis le 2026-10-28) ; 1 = prorata entier, l'ancien simulateur (non-régression : `config/nonreg.json`) | E1, mesuré le 2026-10-28 : volume de contrôle 1,052 → 1,006 avec 0,5 ([`simulateur-maker.md`](simulateur-maker.md) §10.2) | part de la réduction prorata appliquée à la file devant nous ; sans effet avec `behind` |
 | `post_only_cross_check` | `decision` ; option `arrival` | `sim.mjs:377-378` ; un post-only qui croiserait est rejeté, pas retardé (doc officielle, voir [`ordres-et-appariement.md`](recherche/ordres-et-appariement.md)) | vérification à l'arrivée vs à la décision `[à vérifier]` |
 | `silence_ms` | 3000 | `sim.mjs:38` ; seuil de silence Polymarket 3 s (`engine/JOURNAL.md:67`) | calibré sur 17 M de messages |
 | `trading_cutoff_ms_after_end` | 2000 | `sim.mjs:258` | **aucune règle documentée** `[à vérifier]` |
@@ -208,7 +208,7 @@ Exemple de lot actuel (`engine/maker-bt/batches/x04-mix-frozen.json`) : `{"name"
   "venue": {
     "one_way_ms": 12.2, "ack_ms": 0,
     "taker_hold": { "quantiles_s": [[0,0.15],[0.1,0.19],[0.5,0.36],[0.9,1.5],[1,3.5]], "seed": 7 },
-    "fill_bound": "exact", "fill_lookback_ms": 0, "cancel_queue": "pro_rata", "cancel_ahead_factor": 1,
+    "fill_bound": "exact", "fill_lookback_ms": 0, "cancel_queue": "pro_rata", "cancel_ahead_factor": 0.5,
     "post_only_cross_check": "decision", "silence_ms": 3000, "trading_cutoff_ms_after_end": 2000,
     "rebates": true, "trade_fail_rate": 0, "consume_own_liquidity": false,
     "min_size_rule": { "min_shares": 5 }
@@ -310,6 +310,6 @@ Décision D6 ([contrats-migration.md:138](migration/contrats-migration.md), [:18
 
 ## 10. Points à vérifier
 
-Limites du mode trace (mesurées le 2026-10-28, détail dans [`backtest/README.md`](../backtest/README.md)) : décalage d'horloge des anciennes sessions non transmis à l'engine ; borne `exact` sans trades sur les anciennes traces ; tick de 0,001 refusé par l'engine (tick de la fenêtre figé) ; traces du 28/10 sans résultat officiel.
+Limites du mode trace (mesurées le 2026-10-28, détail dans [`backtest/README.md`](../backtest/README.md)) : décalage d'horloge des anciennes sessions non transmis à l'engine ; borne `exact` sans trades sur les anciennes traces ; traces courantes du 28/10 sans résultat officiel (traceur corrigé et redéployé le jour même).
 
 Points `[à vérifier]` d'architecture ([conception-engine-migration.md:22](migration/conception-engine-migration.md)) : symétrie de l'aller simple ; délai de réponse d'un ordre accepté ; ordre de sortie des ordres retenus ; retenue des annulations maker ; sémantique FOK ; post-only vérifié à l'arrivée vs à la décision ; file mesurée à la décision vs à l'arrivée ; impact de nos ordres sur le carnet ; annulations prorata vs « toutes derrière » ; `last_trade_price` vs `labelTrades` ; taille minimale côté serveur ; arrondi des frais (5 décimales vs entier exact) ; durabilité des rebates ; délai de réclamation ; ordres après la fin de fenêtre ; slug d'un autre actif ; taux de trades `FAILED` ; `bench/parity.sh` absent.

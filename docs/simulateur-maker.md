@@ -203,7 +203,7 @@ Sur les 59 695 jumeaux avec le facteur 0,5 : volume 1,002, ordres exacts 83,5 %,
 - **Gain** : le biais de volume disparaît, et le contrôle le confirme (1,052 → 1,006). L'erreur de PnL totale passe de −4,3 % à −2,9 %.
 - **Coût** : −0,6 point d'ordres exacts. La correction règle le biais global mais pas l'erreur ordre par ordre : elle retarde aussi les ordres remplis en entier, déjà sous-prédits.
 - **Surajustement** : risque faible (un seul paramètre, choisi sur l'ajustement, confirmé en contrôle sur le volume). Le PnL d'ajustement (3 716 $ réels) est trop petit pour départager les facteurs.
-- **Valeur retenue** : le défaut reste 1, pour que la non-régression reste vraie (vérifié : 0 écart avec l'oracle). Valeur recommandée pour les backtests : **0,5**, à passer en surcharge (`{"venue": {"cancel_ahead_factor": 0.5}}`).
+- **Valeur retenue** : **0,5 par défaut depuis le 2026-10-28** (décision utilisateur : la plus cohérente avec le réel). La non-régression garde le comportement de l'ancien simulateur par la surcharge `backtest/config/nonreg.json` (facteur 1), toujours à 0 écart avec l'oracle.
 
 ### 10.3 Ordres sans file devant eux : erreur de mesure, pas de correction (2026-10-28)
 
