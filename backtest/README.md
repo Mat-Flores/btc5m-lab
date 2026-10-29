@@ -16,6 +16,7 @@ Rust ne tourne que dans WSL `Ubuntu-24.04`. Depuis Git Bash, préfixer les appel
 | `backtest compare <oracle.jsonl> <nous.jsonl>` | comparaison ligne à ligne, bit à bit |
 | `backtest validate … --maker 0x56f6…e251` | rejoue les ordres réels d'arcsine (données publiques copiées dans `data/wallets/`, ignoré par git) |
 | `node scripts/ltp-check.mjs ../source-tracing/trace <jour>` | valide les `last_trade_price` d'un jour de traces contre data-api |
+| `node scripts/chocs.mjs out/chocs.jsonl <data/binance du dépôt source>` | étude des fenêtres « choc » sur l'export de `run --override config/packs.json --batch config/chocs.json` ([`docs/recherche/fenetres-choc.md`](../docs/recherche/fenetres-choc.md)) |
 | `node scripts/split.mjs <export validate>` | chiffres de `validate` séparés en fenêtres d'ajustement et de contrôle (E1) |
 
 Les sorties (`out/`) et `target/` sont ignorés par git.
@@ -34,7 +35,7 @@ Limites du mode trace (mesurées le 2026-10-28) :
 - **Borne `exact`** : elle a besoin des trades. Les anciens enregistrements Node n'en ont pas : seuls les asks qui croisent notre bid remplissent. Les traces courantes ont les `last_trade_price`, validés le 2026-10-28 contre les fills publics de data-api (`scripts/ltp-check.mjs`, 38 fenêtres) : 99,5 % des transactions preneuses présentes, toutes de même taille ; volume par niveau du carnet Up : rappel 90 %, précision 92 % (un trade qui balaie plusieurs niveaux n'en donne qu'un prix). Le volume d'un trade est crédité à son niveau et au niveau miroir de l'autre token.
 - **Tick du marché** : l'engine suit le tick annoncé par le flux (`tick_size_change`, tick d'un instantané) ; sur les anciennes traces qui ne le gardaient pas, un niveau hors de la grille fait passer la fenêtre au tick de 0,001 (le marché acceptait ce prix ; règle de `sim.mjs`).
 - **Couverture** : Binance n'est enregistré que les 14→17/10 et 26→28/10. Le signal par défaut (binance-spot) n'existe pas les autres jours : la stratégie ne cote pas.
-- **Résultats officiels** : les traces courantes du 28/10 n'en ont aucun (le traceur cessait d'interroger gamma 120 s après la fin d'une fenêtre, le résultat arrive ≈ 5 min après) : aucun marché n'y est réglé. Traceur corrigé et redéployé le 2026-10-28 (900 s).
+- **Résultats officiels** : les traces courantes du 28/10 n'en ont aucun (le traceur cessait d'interroger gamma 120 s après la fin d'une fenêtre, le résultat arrive ≈ 5 min après) : aucun marché n'y est réglé. Traceur corrigé et redéployé le 2026-10-29 à 02:11 UTC (900 s) : vérifié sur le 29/10, 171/171 marchés réglés, `"closed":true` 136 à 723 s après la fin.
 - **Gamma interrogé toutes les 10 s** : chaque fenêtre et chaque résultat ne sont donnés qu'une fois à l'engine.
 - **Fichiers d'un hôte secondaire** (`<jour>.<hôte>.old.jsonl.gz`, D5) : ignorés, seul le fichier canonique du jour est lu.
 

@@ -13,7 +13,8 @@ Ce qui a été essayé ou envisagé puis abandonné, pour ne pas le réexplorer 
 | Bids sur l'outsider en fin de fenêtre (b10) | 73 pertes sur 74 fills, −43 à −99 % : le vendeur qui nous remplit est informé | 2026-10-22/23 | [exploration b01-b10](recherche/exploration-maker-b01-b10.md) |
 | Retrait rapide des bids sur mouvement d'OKX (b07) | 14 stratégies, 0 promue, −31 à −72 % sur la semaine | 2026-10-22/23 | [exploration b01-b10](recherche/exploration-maker-b01-b10.md) |
 | Répliquer arcsine ; rejouer CERTova | Meilleur réplica d'arcsine −1,58 $/fenêtre (le wallet : +6,37) ; edge de CERTova éteint (avril +29,7 k$, mai −1,9 k$) | 2026-10-25/26 | `engine/maker-bt/WALLETS.md:25-29, :107-117, :209` ; [wallets](recherche/wallets-arcsine-certova.md) |
-| Pause de cotation sur les news (VON, IA) | La news arrive plus lentement que le prix ; non backtestable | 2026-10-28 | décision utilisateur (la pause sur calendrier macro reste une idée non décidée) |
+| Pause de cotation sur les news (VON, IA) | La news arrive plus lentement que le prix ; non backtestable | 2026-10-28 | décision utilisateur (la pause sur calendrier macro : ligne suivante) |
+| Garde-fous anti-choc (`noKnife`, `maxDiverge`, `maxImbalance`, `pullSide`, `pull`) et pause sur calendrier macro US | Maker continu : il gagne dans les chocs et perd ailleurs, aucun garde-fou significatif (tous les IC95 contiennent 0, signe instable entre sel et test) ; LT-REF : inutiles ou nuisibles ; pause macro : 12 fenêtres, non concluant | 2026-10-29 | [fenêtres choc](recherche/fenetres-choc.md) |
 
 ## Plateformes, infrastructure, exécution
 

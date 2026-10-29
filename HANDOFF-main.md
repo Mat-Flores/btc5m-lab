@@ -13,11 +13,13 @@
 - docs/ restructuré : racine = projet, `recherche/`, `migration/`, `pistes-ecartees.md`, 0 lien cassé.
 
 ## Reste à faire
-1. Vérifier qu'un `pull` du 29/10 ramène des lignes `http` gamma avec `"closed":true` (traceur redéployé le 28/10 avec `gamma_prev_grace_s` 900).
-2. `pull` quotidien (≈ 4 Go/jour, 25 Go libres sur le serveur).
-3. Idée non décidée : PnL des fenêtres « choc » avec/sans `no_knife`, `max_diverge`, `max_imbalance`, `Move`, puis éventuelle pause sur calendrier macro, validée en walk-forward + Monte Carlo.
+Rien d'ouvert sur `main`.
 
-FAIT aussi le 28/10 : engine suit le tick du marché (`follow_tick`) ; traceur redéployé (900 s) ; convert-report et deploy/ vide supprimés.
+FAIT le 29/10 : étude complète des fenêtres « choc » → piste écartée (`docs/recherche/fenetres-choc.md`, ligne dans `docs/pistes-ecartees.md`). Lot `backtest/config/chocs.json`, analyse `backtest/scripts/chocs.mjs`.
+(Le `pull` quotidien est fait à la main par l'utilisateur, hors HANDOFF.)
+
+FAIT le 29/10 : suivi gamma 900 s vérifié sur le `.part-2` du 29/10 (traceur redéployé le 29/10 à 02:11 UTC, pas le 28 ; le fichier du 28/10 est donc encore à 120 s) : 171/171 marchés suivis passent `"closed":true`, de 136 à 723 s après la fin (médiane 305 s, p95 445 s).
+FAIT aussi le 28/10 : engine suit le tick du marché (`follow_tick`) ; traceur redéployé (900 s, effectif le 29/10 02:11 UTC) ; convert-report et deploy/ vide supprimés.
 FAIT le 29/10 (limites) : note d'unification papier/TraceVenue en tête de `engine/app/src/paper.rs` (à faire quand une stratégie maker passera en papier) ; `last_trade_price` validé contre data-api (`backtest/scripts/ltp-check.mjs` : 99,5 % des tx, niveaux 90/92 %) + crédit au niveau miroir ; TP/SL mesuré (G2-C 961,55 vs 950,86 $, G4-E ruiné des deux côtés) après correction du refus de vente au-delà du solde ; arcsine copié (`backtest/data/wallets/`, gitignoré) et `validate --maker` à 0 écart avec l'oracle ; `cancel_ahead_factor` revenu à 1 (arcsine contredit 0,5).
 
 ## Décisions et pièges
@@ -38,4 +40,4 @@ FAIT le 29/10 (limites) : note d'unification papier/TraceVenue en tête de `engi
 - Backtest sur traces : `backtest run --config config/default.json --override <f.json>` (dans WSL, depuis `backtest/`).
 
 ## Prochaine action
-Demander à l'utilisateur le feu vert pour `source-tracing/deploy/start` (redéploiement du traceur avec 900 s de suivi gamma), puis vérifier le lendemain qu'un `pull` ramène des lignes `http` gamma avec `"closed":true`.
+Aucune. Fait nouveau possible : relancer `chocs.json` sur des traces courantes réglées (à partir du 29/10) quand plusieurs semaines seront rapatriées.

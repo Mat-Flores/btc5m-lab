@@ -36,6 +36,7 @@
 | [strategies-preneuses.md](recherche/strategies-preneuses.md) | Stratégie de référence et candidates C1 à C6, parité à zéro écart, papier de 18,7 h, effet de la retenue réelle |
 | [strategies-maker.md](recherche/strategies-maker.md) | Backtest maker G1 à G4, hypothèse « annuler le côté perdant » réfutée, calibration trades / carnets |
 | [exploration-maker-b01-b10.md](recherche/exploration-maker-b01-b10.md) | Critères R1 à R7, lots b01 à b10, r6, x01 à x05, confirmations, état « à revoir » |
+| [fenetres-choc.md](recherche/fenetres-choc.md) | Fenêtres « choc » : garde-fous (noKnife, maxDiverge, maxImbalance, pullSide, pull) et pause macro, walk-forward + Monte Carlo (2026-10-29, fait dans ce dépôt) |
 | [wallets-arcsine-certova.md](recherche/wallets-arcsine-certova.md) | Wallets arcsine et CERTova : paramètres reconstruits, présence sélective, irréplicabilité |
 | [engine-mesures-phases.md](recherche/engine-mesures-phases.md) | Mesures et critères de sortie des phases 3 à 10 de l'engine |
 | [exploitation-deploiement.md](recherche/exploitation-deploiement.md) | Ancien déploiement : nœuds `dublin-*`, application `trading-gap`, wallets chiffrés, passation du 2026-10-22 |
