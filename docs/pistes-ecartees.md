@@ -36,6 +36,7 @@ Ce qui a été essayé ou envisagé puis abandonné, pour ne pas le réexplorer 
 | Bornes de fill `prudent`, `traversée`, `calibrée`, `optimiste` comme référence | Sur ordres réels : PnL −97 %, −19 %, +12 %, −12 % ; la borne `exact` fait −4,3 % | 2026-10-24/25 | [simulateur maker](simulateur-maker.md) §3 |
 | Retenue de 150 ms appliquée aux fills maker (`fill_lookback_ms`) | PnL prédit 7 943 $ pour 16 383 $ réels (−52 %) ; les poses ne sont pas retenues | 2026-10-25 | `engine/maker-bt/WALLETS.md:71, :123` |
 | Corriger par une option du modèle la surprédiction des ordres sans file devant eux | Erreur de mesure de `validate` (pose mal retrouvée pour les tailles courantes), pas du modèle | 2026-10-28 | [simulateur maker](simulateur-maker.md) §10.3 |
+| `cancel_ahead_factor` à 0,5 par défaut | Corrige les makers tiers (volume 1,044 → 1,002) mais dégrade arcsine (0,958 → 0,873) ; ensemble, 1 est le plus proche du réel | 2026-10-28 | [simulateur maker](simulateur-maker.md) §10.4 |
 | Ancien moteur de backtest Node (`sim.mjs`) comme outil courant | Porté en Rust à 0 écart ; le backtest exécute le code de l'engine | 2026-10-28 | [`backtest/README.md`](../backtest/README.md) |
 
 ## Projet et exploitation

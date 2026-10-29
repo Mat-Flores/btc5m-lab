@@ -13,7 +13,9 @@ pub const ORDER_FILLED: &str = "0xd543adfd945773f1a62f74f0ee55a5e3b9b1a28262980b
 /// Les deux échanges qui émettent ces logs (relevés sur la chaîne) : standard et neg-risk.
 pub const EXCHANGES: [&str; 2] = ["0xe111180000d2663c0091e4f400237545b87b996b", "0xe2222d279d744050d28e00520010520000310f59"];
 
-/// Abonnement : les fills où `wallet` est maker, et les en-têtes de blocs (leur horodatage date l'ordre suivi).
+/// Abonnement : les fills où `wallet` est maker, et les en-têtes de blocs, pour que le flux ne soit jamais muet. L'horodatage
+/// de bloc ne date pas l'ordre (il tombe en moyenne ~1 s APRÈS la réception du log, mesuré à l'étape 3) : l'ordre est
+/// daté par le match CLOB (websocket market).
 pub struct Logs { pub url: String, pub wallet: String }
 
 impl Adapter for Logs {
@@ -34,10 +36,10 @@ impl Adapter for Logs {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Fill { pub tx: String, pub log_index: u64, pub block: u64, pub token: String, pub buy: bool, pub usd: f64, pub shares: f64 }
+pub struct Fill { pub tx: String, pub log_index: u64, pub token: String, pub buy: bool, pub usd: f64, pub shares: f64 }
 
 #[derive(Debug, PartialEq)]
-pub enum Frame { Fill(Fill), Head { block: u64, ts_s: u64 }, Other }
+pub enum Frame { Fill(Fill), Other }
 
 fn hex_u64(v: &Value) -> Option<u64> { u64::from_str_radix(v.as_str()?.trim_start_matches("0x"), 16).ok() }
 /// Mot de 32 octets (hex) → décimal, pour un tokenId (jusqu'à 78 chiffres).
@@ -63,12 +65,12 @@ pub fn read(text: &str) -> Frame {
         let buy = side == 0.0;
         // achat : il donne des USDC (maker) contre des parts (taker) ; vente : l'inverse
         let (usd, shares) = if buy { (a, b) } else { (b, a) };
-        return match (r["transactionHash"].as_str(), hex_u64(&r["logIndex"]), hex_u64(&r["blockNumber"])) {
-            (Some(tx), Some(log_index), Some(block)) => Frame::Fill(Fill { tx: tx.to_lowercase(), log_index, block, token: word_dec(tok), buy, usd, shares }),
+        return match (r["transactionHash"].as_str(), hex_u64(&r["logIndex"])) {
+            (Some(tx), Some(log_index)) => Frame::Fill(Fill { tx: tx.to_lowercase(), log_index, token: word_dec(tok), buy, usd, shares }),
             _ => Frame::Other,
         };
     }
-    match (hex_u64(&r["number"]), hex_u64(&r["timestamp"])) { (Some(block), Some(ts_s)) => Frame::Head { block, ts_s }, _ => Frame::Other }
+    Frame::Other
 }
 
 #[cfg(test)]
@@ -87,7 +89,7 @@ mod tests {
     /// Trame refaite avec les valeurs d'un log réel du wallet : achat de 200 parts pour 100 USDC (data-api : BUY 200 @ 0,5 = 100 $).
     #[test]
     fn real_buy_log_decodes_as_data_api_reports_it() {
-        assert_eq!(read(&log(0, 100_000_000, 200_000_000)), Frame::Fill(Fill { tx: "0xe36c".into(), log_index: 26, block: 96_356_977, token: TOKEN.into(), buy: true, usd: 100.0, shares: 200.0 }));
+        assert_eq!(read(&log(0, 100_000_000, 200_000_000)), Frame::Fill(Fill { tx: "0xe36c".into(), log_index: 26, token: TOKEN.into(), buy: true, usd: 100.0, shares: 200.0 }));
     }
 
     /// Vente : les montants s'inversent `[non vérifié sur log réel de vente : contrôlé à chaque run par data-api]`.
@@ -99,7 +101,7 @@ mod tests {
 
     #[test]
     fn heads_acks_and_garbage() {
-        assert_eq!(read(r#"{"jsonrpc":"2.0","method":"eth_subscription","params":{"subscription":"0x2","result":{"number":"0x10","timestamp":"0x6a1b2c3d","hash":"0x1"}}}"#), Frame::Head { block: 16, ts_s: 0x6a1b2c3d });
+        assert_eq!(read(r#"{"jsonrpc":"2.0","method":"eth_subscription","params":{"subscription":"0x2","result":{"number":"0x10","timestamp":"0x6a1b2c3d","hash":"0x1"}}}"#), Frame::Other);
         assert_eq!(read(r#"{"jsonrpc":"2.0","id":1,"result":"0xabc"}"#), Frame::Other);
         assert_eq!(read("pas du json"), Frame::Other);
         assert_eq!(read(&log(0, 1, 2).replace("\"data\":\"0x", "\"data\":\"0xzz")), Frame::Other);

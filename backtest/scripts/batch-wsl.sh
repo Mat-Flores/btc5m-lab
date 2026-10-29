@@ -12,6 +12,6 @@ cd "$BT"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/bt-target}"
 ~/.cargo/bin/cargo build --release --quiet
 mkdir -p out
-"$CARGO_TARGET_DIR/release/backtest" run --config config/default.json --override config/packs.json --override config/nonreg.json \
+"$CARGO_TARGET_DIR/release/backtest" run --config config/default.json --override config/packs.json \
   --batch "/mnt/c/dev/REA Projects/btc5m-lag-sim/engine/maker-bt/batches/$B.json" --export "out/$B-rust.jsonl" | tee "out/$B-rust.txt"
 [ -f "out/$B-oracle.jsonl" ] && "$CARGO_TARGET_DIR/release/backtest" compare "out/$B-oracle.jsonl" "out/$B-rust.jsonl"

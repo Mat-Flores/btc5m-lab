@@ -203,13 +203,22 @@ Sur les 59 695 jumeaux avec le facteur 0,5 : volume 1,002, ordres exacts 83,5 %,
 - **Gain** : le biais de volume disparaît, et le contrôle le confirme (1,052 → 1,006). L'erreur de PnL totale passe de −4,3 % à −2,9 %.
 - **Coût** : −0,6 point d'ordres exacts. La correction règle le biais global mais pas l'erreur ordre par ordre : elle retarde aussi les ordres remplis en entier, déjà sous-prédits.
 - **Surajustement** : risque faible (un seul paramètre, choisi sur l'ajustement, confirmé en contrôle sur le volume). Le PnL d'ajustement (3 716 $ réels) est trop petit pour départager les facteurs.
-- **Valeur retenue** : **0,5 par défaut depuis le 2026-10-28** (décision utilisateur : la plus cohérente avec le réel). La non-régression garde le comportement de l'ancien simulateur par la surcharge `backtest/config/nonreg.json` (facteur 1), toujours à 0 écart avec l'oracle.
+- **Valeur retenue : 1 (inchangé)**. Mesurée aussi sur les 29 579 ordres d'arcsine (données publiques copiées le 2026-10-28, §10.4), la correction aggrave son écart de volume (0,958 → 0,873) : les deux populations tirent en sens opposés, et ensemble (2,23 M parts réelles) le volume prédit vaut 1,000 avec le facteur 1 contre 0,936 avec 0,5. L'option reste disponible pour une étude ciblée.
 
 ### 10.3 Ordres sans file devant eux : erreur de mesure, pas de correction (2026-10-28)
 
 Mesure (ajustement, rejeu des jumeaux instrumenté puis retiré) : sur les ordres à `qa0` = 0, 80 % du volume prédit vient de trades à notre prix, 14 % de trades à travers, 8 % d'asks qui croisent. 20 % du volume prédit tombe **avant** le premier fill réel (avance médiane 760 ms, p90 6,9 s) : un ordre seul à son prix serait pourtant touché par ce trade. La part de ces fills précoces dépend de la taille de l'ordre : 49 % du volume « à notre prix » pour les ordres de 5 parts, 33 % de 6 à 20, 15 % de 21 à 100, 3 % au-delà.
 
 Conclusion : la pose est mal retrouvée. `validate` prend comme arrivée le premier ajout de **exactement la taille de l'ordre** au niveau, dès 1 s avant sa création ; pour une taille courante, c'est souvent l'ordre de quelqu'un d'autre (déjà signalé : `WALLETS.md:82`). C'est une erreur de mesure, à traiter dans l'appariement de `validate` (par exemple l'ajout le plus proche de l'heure de création), **pas** une option de l'exchange simulé (méthode E1, point 3). Non fait : l'appariement de `validate` est la référence de non-régression.
+
+### 10.4 Ordres d'arcsine (2026-10-28)
+
+L'activité publique du wallet arcsine (`0x56f6…e251`, aucune clé) est copiée dans `backtest/data/wallets/` (sha256 vérifiés) ; `backtest validate --maker` la rejoue, identique à l'oracle Node (`validate.mjs --maker`) : 29 579 jumeaux, 0 écart. Volume 0,958, ordres exacts 71,0 %, PnL 16 645 $ pour 15 360 $ réels (+8,4 %).
+
+| Facteur | Ajustement (15→19/10) : volume / exacts / PnL (réel 8 197 $) | Contrôle (20→23/10) : volume / exacts / PnL (réel 7 163 $) |
+| --- | --- | --- |
+| 1 | 0,958 / 69,9 % / 9 301 $ (+13,5 %) | 0,958 / 72,4 % / 7 345 $ (+2,5 %) |
+| 0,5 | 0,873 / 69,5 % / 8 311 $ (+1,4 %) | 0,872 / 72,0 % / 6 376 $ (−11,0 %) |
 
 ## 11. Points à vérifier
 

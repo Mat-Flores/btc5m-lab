@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# start : choisit paper ou live, compile dans WSL, envoie le binaire + la config, demarre, puis verifie que le bot suit
+# bien le wallet. En live : phrase secrete demandee a CHAQUE start (saisie masquee), transmise au process par stdin via ssh.
+# Usage : start [--mode paper|live] [--yes]
+#   --mode  sans menu ;  --yes  pas de question de confirmation (la phrase secrete reste demandee en live)
+set -uo pipefail
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+MODE=""; ASSUME_YES=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --mode) shift; MODE="${1:-}" ;;
+    --yes|-y) ASSUME_YES=1 ;;
+    -h|--help) sed -n '2,6p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "option inconnue : $1 (voir --help)" ;;
+  esac
+  shift
+done
+EXAMPLE="$CT_DIR/config.example.json"
+[ -f "$EXAMPLE" ] || die "introuvable : $EXAMPLE"
+load_env
+title "start : copy-trading -> $SSH_DEST"
+
+# ---- 1. etat du serveur et choix du mode ------------------------------------------------------------------------
+check_conn
+if installed; then info "etat actuel : $(state_line)"; else info "serveur pas encore installe (setup au premier start)"; fi
+if [ -z "$MODE" ]; then
+  [ -t 0 ] || die "pas de terminal interactif : utiliser --mode paper|live"
+  title "mode"
+  info "1) paper : aucun ordre ; remplissages calcules sur le vrai carnet observe (defaut)"
+  info "2) live  : ORDRES REELS avec le wallet chiffre du serveur"
+  read -r -p "  choix [1] : " c; case "${c:-1}" in 1) MODE=paper ;; 2) MODE=live ;; *) die "choix inconnu : $c" ;; esac
+fi
+case "$MODE" in paper|live) ;; *) die "--mode attend paper ou live" ;; esac
+
+PASS=""
+if [ "$MODE" = live ]; then
+  [ -t 0 ] || die "le live exige un terminal (saisie masquee de la phrase secrete)"
+  if installed && lock_present; then
+    warn "le run live precedent ne s'est pas arrete proprement (crash ou redemarrage du serveur) ; son journal dit :"
+    rsh "grep -E \"\\\"t\\\":\\\"(halt|stop)\\\"\" $R_JOURNAL | tail -n 2" | sed 's/^/    /'
+    confirm "relancer quand meme en live (le verrou sera supprime) ?" || { info "annule."; exit 1; }
+  fi
+  if ! { installed && rplain "sudo -n test -s $R_WALLET"; }; then
+    title "wallet chiffre absent du serveur : creation locale"
+    info "la cle est chiffree DANS WSL (scrypt + AES-256-GCM, format v1) ; seule la ligne chiffree part au serveur"
+    read -r -p "  adresse du Deposit Wallet (0x...) : " DEPOSIT
+    [[ "$DEPOSIT" =~ ^0x[0-9a-fA-F]{40}$ ]] || die "adresse invalide"
+    read -rs -p "  cle privee (masquee) : " KEY; printf '\n'
+    read -rs -p "  phrase secrete (masquee) : " PASS; printf '\n'
+    read -rs -p "  phrase secrete, encore : " P2; printf '\n'
+    [ "$PASS" = "$P2" ] || { KEY=""; PASS=""; P2=""; die "les deux phrases different"; }
+    WSL_CT=$(printf '%s' "$CT_DIR" | sed -E 's|^/([a-zA-Z])/|/mnt/\L\1/|')
+    LINE=$(printf '%s\n%s\n' "$KEY" "$PASS" | MSYS_NO_PATHCONV=1 wsl.exe -d "${WSL_DISTRO:-Ubuntu-24.04}" -- bash "$WSL_CT/deploy/build-wsl.sh" "$WSL_CT" encrypt "$DEPOSIT" | tr -d '\r')
+    KEY=""; P2=""
+    [[ "$LINE" =~ ^0x[0-9a-fA-F]{40}:v1\. ]] || die "chiffrement echoue (cle : 64 hex attendus)"
+    NEW_WALLET="$LINE"
+  else
+    read -rs -p "  phrase secrete du wallet (masquee) : " PASS; printf '\n'
+  fi
+  [ -n "$PASS" ] || die "phrase secrete vide"
+fi
+
+# ---- 2. recapitulatif ---------------------------------------------------------------------------------------------
+NEW_CFG=$(sed -E "s|(\"wallet\" *: *\")[^\"]*|\1$WALLET|; s|(\"mode\" *: *\")[^\"]*|\1$MODE|; s|(\"wallet_file\" *: *\")[^\"]*|\1$R_WALLET|; s|(\"journal\" *: *\")[^\"]*|\1$R_JOURNAL|" "$EXAMPLE")
+title "recapitulatif"
+info "serveur        : $SSH_DEST"
+if [ "$MODE" = live ]; then info "mode           : ${RED}${BLD}LIVE (ordres reels)${RST}"; else info "mode           : paper"; fi
+info "wallet suivi   : $WALLET"
+info "paliers        : $(printf '%s' "$NEW_CFG" | sed -nE 's/.*"tiers" *: *(\[.*\]),?$/\1/p')  (part de sa mise -> part de mon capital)"
+info "capital paper  : $(printf '%s' "$NEW_CFG" | sed -nE 's/.*"paper_cash_usd" *: *([0-9.]+).*/\1/p') \$ ; ordre max : $(printf '%s' "$NEW_CFG" | sed -nE 's/.*"max_order_usd" *: *([0-9.]+).*/\1/p') \$ ; ecart de prix max : $(printf '%s' "$NEW_CFG" | sed -nE 's/.*"max_slippage" *: *([0-9.]+).*/\1/p')"
+info "un run deja actif sera arrete puis remplace"
+confirm "deployer et demarrer ?" || { PASS=""; info "annule."; exit 1; }
+
+NT=6; N=0
+# ---- 3. installation (premiere fois) ------------------------------------------------------------------------------
+N=$((N+1)); etape $N $NT "installation du serveur (premiere fois seulement)"
+if installed; then ok "deja installe"; else
+  tar -C "$DEPLOY_DIR" -cf - setup.sh "$UNIT.service" | rplain "rm -rf /tmp/ct-setup && mkdir -p /tmp/ct-setup && tar -xf - -C /tmp/ct-setup" || die "envoi de setup.sh"
+  rroot "bash /tmp/ct-setup/setup.sh" || die "setup.sh a echoue (voir sortie ci-dessus)"
+  ok "serveur installe"
+fi
+
+# ---- 4. compilation + envoi -----------------------------------------------------------------------------------------
+N=$((N+1)); etape $N $NT "compilation dans WSL (release, arm64)"
+command -v wsl.exe >/dev/null || die "wsl.exe introuvable : WSL Ubuntu-24.04 est requis pour compiler (voir COMMANDES.md)"
+WSL_CT=$(printf '%s' "$CT_DIR" | sed -E 's|^/([a-zA-Z])/|/mnt/\L\1/|')
+LOG=$(mktemp)
+MSYS_NO_PATHCONV=1 wsl.exe -d "${WSL_DISTRO:-Ubuntu-24.04}" -- bash "$WSL_CT/deploy/build-wsl.sh" "$WSL_CT" 2>&1 | tr -d '\r' > "$LOG"
+grep -q '^BINAIRE-OK ' "$LOG" || { tail -n 25 "$LOG"; die "compilation WSL echouee (journal : $LOG ; prerequis : voir COMMANDES.md)"; }
+rm -f "$LOG"
+BIN="$CT_DIR/target/wsl-bin/copy-trading"; LSHA=$(sha256sum "$BIN" | cut -d' ' -f1)
+ok "binaire pret, sha256 ${LSHA:0:16}..."
+N=$((N+1)); etape $N $NT "envoi du binaire (fichier temporaire, verification sha256, remplacement atomique)"
+TMPB="/tmp/ct-bin.$$"
+rplain "cat > $TMPB" < "$BIN" || die "envoi du binaire"
+RSHA=$(rplain "sha256sum $TMPB" | cut -d' ' -f1)
+[ "$RSHA" = "$LSHA" ] || { rplain "rm -f $TMPB"; die "sha256 distant different ($RSHA) : envoi abandonne, binaire du serveur intact"; }
+rroot "install -o $RUSER -g $RUSER -m 755 $TMPB $APP/bin/copy-trading.new && mv -f $APP/bin/copy-trading.new $APP/bin/copy-trading && rm -f $TMPB" || die "installation du binaire"
+ok "binaire installe dans $APP/bin/copy-trading (sha256 verifie)"
+
+# ---- 5. config (+ wallet chiffre) puis arret de l'ancien run ----------------------------------------------------------
+N=$((N+1)); etape $N $NT "config, arret du run en cours"
+printf '%s\n' "$NEW_CFG" | rsh "cat > $R_CONFIG.tmp && mv -f $R_CONFIG.tmp $R_CONFIG" || die "ecriture de $R_CONFIG"
+[ "$(rsh "cat $R_CONFIG")" = "$NEW_CFG" ] || die "la config relue sur le serveur differe de celle envoyee"
+ok "config ecrite et relue ($R_CONFIG)"
+if [ -n "${NEW_WALLET:-}" ]; then
+  printf '%s\n' "$NEW_WALLET" | rsh "umask 077 && cat > $R_WALLET" || die "envoi du wallet chiffre"
+  NEW_WALLET=""
+  ok "wallet chiffre depose ($R_WALLET, chmod 600)"
+fi
+rroot "systemctl disable --now $UNIT 2>/dev/null; true" >/dev/null
+# systemd cree run.log en root ; le run live (copyt) doit pouvoir y ecrire
+rroot "touch $R_RUNLOG && chown $RUSER:$RUSER $R_RUNLOG" || die "run.log"
+P=$(live_pid); [ -n "$P" ] && rroot "kill -TERM $P"
+for _ in $(seq 1 20); do [ -z "$(live_pid)" ] && [ "$(svc_state)" != active ] && break; sleep 1; done
+[ -z "$(live_pid)" ] && [ "$(svc_state)" != active ] || die "l'ancien run ne s'arrete pas : utiliser deploy/stop"
+ok "aucun run actif"
+
+# ---- 6. demarrage et verification -------------------------------------------------------------------------------------
+N=$((N+1)); etape $N $NT "demarrage ($MODE)"
+BEFORE=$(rsh "grep -c \"\\\"t\\\":\\\"start\\\"\" $R_JOURNAL 2>/dev/null; true" | head -1); BEFORE=${BEFORE:-0}
+if [ "$MODE" = paper ]; then
+  rroot "systemctl enable --now $UNIT" >/dev/null 2>&1 || die "systemctl enable --now $UNIT"
+else
+  rroot "rm -f $R_LOCK"
+  # fd 3 = stdin de ssh (la phrase) ; sans lui, sh donnerait /dev/null au process lance en arriere-plan
+  R=$(printf '%s\n' "$PASS" | rsh "cd $DATA && n0=\$(grep -c ^ARMED $R_RUNLOG 2>/dev/null || true) && exec 3<&0 && (setsid $APP/bin/copy-trading run $R_CONFIG <&3 >> $R_RUNLOG 2>&1 &) && exec 3<&- && i=0 && while [ \$i -lt 60 ]; do sleep 1; i=\$((i+1)); n=\$(grep -c ^ARMED $R_RUNLOG || true); [ \"\$n\" -gt \"\${n0:-0}\" ] && echo ARMED-OK && exit 0; pgrep -u $RUSER -f \"^$APP/bin/copy-trading run\" >/dev/null || { echo MORT; tail -n 3 $R_RUNLOG; exit 1; }; done; echo DELAI")
+  PASS=""
+  case "$R" in *ARMED-OK*) ok "wallet arme (phrase transmise par stdin, cle en memoire seulement)" ;; *) die "armement echoue : $R" ;; esac
+fi
+N=$((N+1)); etape $N $NT "verification : le bot suit bien $WALLET"
+FOUND=""
+for i in $(seq 1 45); do
+  S=$(rsh "grep \"\\\"t\\\":\\\"start\\\"\" $R_JOURNAL | tail -n 1; grep -c \"\\\"t\\\":\\\"start\\\"\" $R_JOURNAL" 2>/dev/null)
+  if [ "$(printf '%s\n' "$S" | tail -n 1)" -gt "$BEFORE" ] 2>/dev/null; then FOUND=$(printf '%s\n' "$S" | head -n 1); break; fi
+  printf '\r\033[K  '; bar "$i" 45 30; sleep 1
+done
+printf '\r\033[K'
+[ -n "$FOUND" ] || { rsh "tail -n 5 $R_RUNLOG"; die "aucune ligne start dans le journal apres 45 s"; }
+printf '%s' "$FOUND" | grep -qi "\"wallet\":\"$WALLET\"" || die "le bot suit un autre wallet : $FOUND"
+printf '%s' "$FOUND" | grep -q "\"mode\":\"$MODE\"" || die "le bot n'est pas en mode $MODE : $FOUND"
+HV=$(printf '%s' "$FOUND" | sed -nE 's/.*"his_value":([0-9.]+).*/\1/p' | cut -d. -f1)
+[ "${HV:-0}" -gt 0 ] || warn "valeur du wallet suivi inconnue au demarrage (RPC ou data-api) : ses achats seront ignores tant qu'elle manque"
+sleep 3
+FEEDS=$(rsh "grep \"\\\"t\\\":\\\"feed\\\"\" $R_JOURNAL | tail -n 2")
+printf '%s' "$FEEDS" | grep -q '"source":"chain"' && printf '%s' "$FEEDS" | grep -q '"health":"Valid"' || warn "flux pas encore valides : $FEEDS"
+ok "le bot suit $WALLET en $MODE (valeur de son portefeuille : ${HV:-?} \$)"
+info "etat : $(state_line)"
+info "synthese : deploy/report   |   arret : deploy/stop"

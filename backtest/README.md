@@ -9,7 +9,7 @@ Rust ne tourne que dans WSL `Ubuntu-24.04`. Depuis Git Bash, préfixer les appel
 | Commande | Rôle |
 |---|---|
 | `scripts/test-wsl.sh [engine\|backtest]` | tests de l'engine (workspace) puis du backtest |
-| `scripts/validate-wsl.sh` | non-régression du simulateur maker (surcharge `config/nonreg.json` : `cancel_ahead_factor` 1, le comportement validé) : `backtest validate` sur les ordres réels, comparé bit à bit à l'oracle Node (`oracle/validate-export.mjs`) |
+| `scripts/validate-wsl.sh` | non-régression du simulateur maker : `backtest validate` sur les ordres réels, comparé bit à bit à l'oracle Node (`oracle/validate-export.mjs`) |
 | `scripts/batch-wsl.sh <lot>` | non-régression sur un lot de l'ancien dépôt (`x01-retest-exact`, `x04-mix-frozen`…), comparé à l'oracle Node (`oracle/batch-export.mjs`) |
 | `backtest run --config config/default.json [--override f.json]... [--batch lot.json] [--windows a,b] [--export x.jsonl]` | un backtest |
 | `backtest validate [--override …] [--export x.jsonl]` | rejoue les ordres réels des makers tiers (validation du modèle de fill) |
@@ -70,7 +70,7 @@ Limites du mode trace (mesurées le 2026-10-28) :
 | `venue.fill_bound` | `exact` | — | `exact`, `prudent`, `optimistic` ([`simulateur-maker.md`](../docs/simulateur-maker.md) §2) |
 | `venue.fill_lookback_ms` | 0 | ms | un fill daté `ts` vient d'un ordre preneur envoyé à `ts −` ceci ; 0 recommandé (`WALLETS.md:123`) |
 | `venue.cancel_queue` | `pro_rata` | — | une annulation au niveau amincit la file devant nous au prorata ; `behind` : jamais |
-| `venue.cancel_ahead_factor` | 0,5 | 0 à 1 | part du prorata appliquée (E1) : 0,5 est la valeur mesurée la plus proche du réel (volume de contrôle 1,052 → 1,006) ; 1 = comportement de l'ancien simulateur (`config/nonreg.json`) |
+| `venue.cancel_ahead_factor` | 1 | 0 à 1 | part du prorata appliquée à la file devant nous (E1). 1 est le plus proche du réel sur l'ensemble des ordres réels (makers tiers : volume 1,044 → 1,002 avec 0,5 ; arcsine : 0,958 → 0,873 avec 0,5 ; les deux ensemble (2,23 M parts réelles) : 1,000 avec 1, 0,936 avec 0,5) |
 | `venue.post_only_cross_check` | `decision` | — | un post-only qui croiserait est refusé à la décision ; `arrival` non implémenté |
 | `venue.silence_ms` | 3000 | ms | carnet silencieux plus longtemps : aucun fill |
 | `venue.trading_cutoff_ms_after_end` | 2000 | ms | aucun fill au-delà de la fin + ceci `[aucune règle documentée]` |

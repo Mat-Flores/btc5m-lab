@@ -148,7 +148,7 @@ Tous les paramètres sont lus du fichier de config (§6) ; aucun n'est codé en 
 | `fill_bound` | `exact` | recommandation `WALLETS.md:123` | choix de modèle validé sur ordres réels |
 | `fill_lookback_ms` | **0** (obligatoire) | le défaut de `sim.mjs:166` est 150 ms (`opts.delay ?? 0.15`) ; `WALLETS.md:123` recommande 0 avec la borne `exact` ; avec 150 ms le PnL prédit tombe à 7 943 $ pour 16 383 $ réels (−52 %) (`WALLETS.md:71`) | établi sur arcsine (poses non retenues) ; annulations indécidables `[à vérifier]` |
 | `cancel_queue` | `pro_rata` ; option `behind` (toutes les annulations derrière nous) | `sim.mjs:154` ; volume prédit 1,04 (prorata) / 0,94 (derrière) / 1,09 (devant) du réel (`WALLETS.md:40`) | réalité entre prorata et « derrière » : voir `cancel_ahead_factor` |
-| `cancel_ahead_factor` | 0,5 (défaut depuis le 2026-10-28) ; 1 = prorata entier, l'ancien simulateur (non-régression : `config/nonreg.json`) | E1, mesuré le 2026-10-28 : volume de contrôle 1,052 → 1,006 avec 0,5 ([`simulateur-maker.md`](simulateur-maker.md) §10.2) | part de la réduction prorata appliquée à la file devant nous ; sans effet avec `behind` |
+| `cancel_ahead_factor` | 1 (prorata entier) ; 0,5 corrige les makers tiers mais dégrade arcsine | E1, mesuré le 2026-10-28 : volume de contrôle 1,052 → 1,006 avec 0,5 ([`simulateur-maker.md`](simulateur-maker.md) §10.2) | part de la réduction prorata appliquée à la file devant nous ; sans effet avec `behind` |
 | `post_only_cross_check` | `decision` ; option `arrival` | `sim.mjs:377-378` ; un post-only qui croiserait est rejeté, pas retardé (doc officielle, voir [`ordres-et-appariement.md`](recherche/ordres-et-appariement.md)) | vérification à l'arrivée vs à la décision `[à vérifier]` |
 | `silence_ms` | 3000 | `sim.mjs:38` ; seuil de silence Polymarket 3 s (`engine/JOURNAL.md:67`) | calibré sur 17 M de messages |
 | `trading_cutoff_ms_after_end` | 2000 | `sim.mjs:258` | **aucune règle documentée** `[à vérifier]` |
@@ -208,7 +208,7 @@ Exemple de lot actuel (`engine/maker-bt/batches/x04-mix-frozen.json`) : `{"name"
   "venue": {
     "one_way_ms": 12.2, "ack_ms": 0,
     "taker_hold": { "quantiles_s": [[0,0.15],[0.1,0.19],[0.5,0.36],[0.9,1.5],[1,3.5]], "seed": 7 },
-    "fill_bound": "exact", "fill_lookback_ms": 0, "cancel_queue": "pro_rata", "cancel_ahead_factor": 0.5,
+    "fill_bound": "exact", "fill_lookback_ms": 0, "cancel_queue": "pro_rata", "cancel_ahead_factor": 1,
     "post_only_cross_check": "decision", "silence_ms": 3000, "trading_cutoff_ms_after_end": 2000,
     "rebates": true, "trade_fail_rate": 0, "consume_own_liquidity": false,
     "min_size_rule": { "min_shares": 5 }
@@ -306,7 +306,7 @@ Les écarts sont de **signe opposé** (volume sur-prédit d'un côté, sous-pré
 
 Le simulateur JS applique le produit des sorties preneuses (take profit, stop loss) **dès la décision**, en lisant le carnet en avance : `sim.mjs:328-343` (`hold` tiré, `m = t + ONE_WAY + hold`, `bookAt(m)` clone le carnet et rejoue les événements jusqu'à `m`, puis `rec.proceeds`, la position et l'annulation du bid sont mis à jour à l'instant `t` de la décision). Un exchange réaliste livre le fill **à l'arrivée**.
 
-Décision D6 ([contrats-migration.md:138](migration/contrats-migration.md), [:186](migration/contrats-migration.md)) : `SimVenue` est réaliste (fill livré à l'arrivée). La non-régression bit à bit est donc **limitée aux configs sans TP/SL** : `x01-retest-exact`, `x04-mix-frozen`, `validate`. L'écart pour les configs avec TP/SL (par exemple G2-C, G4-E de [`strategies-maker.md`](recherche/strategies-maker.md)) est **documenté, non corrigé** ; son ampleur n'est pas mesurée `[à mesurer]`.
+Décision D6 ([contrats-migration.md:138](migration/contrats-migration.md), [:186](migration/contrats-migration.md)) : `SimVenue` est réaliste (fill livré à l'arrivée). La non-régression bit à bit est donc **limitée aux configs sans TP/SL** : `x01-retest-exact`, `x04-mix-frozen`, `validate`. L'écart pour les configs avec TP/SL (par exemple G2-C, G4-E de [`strategies-maker.md`](recherche/strategies-maker.md)) est **documenté, non corrigé** ; mesurée le 2026-10-28 sur les packs (lot `backtest/oracle/tpsl-batch.json`) : G2-C (TP + SL) finit à 961,55 $ contre 950,86 $ dans l'ancien simulateur (537 fenêtres jouées contre 543) ; G4-E (TP seul) est ruiné dans les deux (0,98 $ contre 1,00 $). L'écart du modèle réaliste est donc faible. La mesure a révélé un défaut corrigé le même jour : une seconde sortie décidée pendant que la première est en route vendait des parts déjà vendues ; l'exchange simulé refuse désormais une vente au-delà des parts détenues, comme Polymarket refuse un ordre au-delà du solde.
 
 ## 10. Points à vérifier
 

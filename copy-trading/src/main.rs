@@ -12,7 +12,9 @@ use adapter_polymarket::exec::{self, Clob, ALLOWED, HOST};
 use adapter_polymarket::sign::{self, Side, Signer};
 use engine_app::arm::Armed;
 use engine_core::clock::Clock;
-use engine_core::feed::{self, Out};
+use adapter_polymarket::market::Market;
+use engine_core::event::Payload;
+use engine_core::feed::{self, Cmd, Out, Timing};
 use engine_core::guard::NetGuard;
 use engine_core::http::{self, dial, Conn};
 use engine_core::order::{Input, Order, Phase};
@@ -41,8 +43,8 @@ struct Config {
     /// Fichier `<adresse>:v1.…` (chmod 600), lu en live seulement.
     wallet_file: String,
     journal: String,
-    /// m = min(100 %, k × p).
-    k: f64,
+    /// Paliers [seuil de p, m] croissants : m = part de mon portefeuille quand sa mise atteint ce seuil de son portefeuille.
+    tiers: Vec<(f64, f64)>,
     /// Capital de départ du compte paper ($).
     paper_cash_usd: f64,
     /// Plafond d'un ordre ($).
@@ -170,11 +172,17 @@ struct Bot {
     real: Account,
     marks: BTreeMap<String, f64>,
     market_of: HashMap<String, String>,
-    heads: BTreeMap<u64, u64>,
+    /// Heure du match CLOB (ms) par hash de transaction, lue sur le websocket market : elle date l'ordre suivi.
+    matched: HashMap<String, u64>,
+    /// Tokens suivis sur le websocket market, et de quoi en ajouter.
+    subscribed: HashSet<String>,
+    market_cmd: tokio::sync::mpsc::UnboundedSender<Cmd>,
     seen_logs: HashSet<(String, u64)>,
     /// Fills de la chaîne par tx : (token, achat, parts), pour le contrôle par data-api.
     by_tx: HashMap<String, (String, bool, f64)>,
     checked: HashSet<String>,
+    /// Tokens où j'ai déjà pris mon entrée (une seule par token).
+    entered: HashSet<String>,
     start_ms: u64,
     live: Option<Live>,
 }
@@ -182,6 +190,8 @@ struct Bot {
 fn now_ms(c: &Clock) -> u64 { c.now().wall_ns / 1_000_000 }
 
 impl Bot {
+    fn done(&mut self, mut line: Value, lat: Value) { line["lat"] = lat; self.log(line) }
+
     fn log(&mut self, mut v: Value) {
         v["at"] = json!(now_ms(&self.clock));
         let _ = writeln!(self.journal, "{v}");
@@ -194,7 +204,10 @@ impl Bot {
         book::parse(&b)
     }
 
-    async fn on_fill(&mut self, f: chain::Fill, src: &str, obs_ms: u64, src_ms: Option<u64>) {
+    async fn on_fill(&mut self, f: chain::Fill, src: &str, obs_ms: u64) {
+        // un token encore jamais vu : son premier match est déjà passé (non mesuré), les suivants seront datés
+        if self.subscribed.insert(f.token.clone()) { let _ = self.market_cmd.send(Cmd::Subscribe(vec![f.token.clone()])); }
+        let src_ms = self.matched.get(&f.tx).copied();
         let his_before = self.his_pos.get(&f.token).copied().unwrap_or(0.0);
         *self.his_pos.entry(f.token.clone()).or_default() += if f.buy { f.shares } else { -f.shares };
         let his_price = if f.shares > 0.0 { f.usd / f.shares } else { 0.0 };
@@ -203,7 +216,7 @@ impl Bot {
         let bk = self.book(&f.token).await;
         let dec_ms = now_ms(&self.clock);
         let mut lat = json!({ "src": src_ms, "obs": obs_ms, "dec": dec_ms, "sent": null, "ack": null, "fill": null });
-        let bk = match bk { Ok(b) => b, Err(e) => { line["decision"] = json!("skip"); line["reason"] = json!(format!("carnet illisible : {e}")); line["lat"] = lat; return self.log(line); } };
+        let bk = match bk { Ok(b) => b, Err(e) => { line["decision"] = json!("skip"); line["reason"] = json!(format!("carnet illisible : {e}")); return self.done(line, lat); } };
         line["book_ts"] = json!(bk.ts_ms);
         self.market_of.insert(f.token.clone(), bk.market.clone());
         if let (Some(b), Some(a)) = (bk.bids.first(), bk.asks.first()) { self.marks.insert(f.token.clone(), (b.0 + a.0) / 2.0); }
@@ -213,17 +226,22 @@ impl Bot {
             skip(&mut line, "neg-risk : signature non prise en charge en live");
         } else if f.buy && self.his_value <= 0.0 {
             skip(&mut line, "valeur du wallet suivi inconnue");
+        } else if f.buy && self.entered.contains(&f.token) {
+            // choix de l'utilisateur : une seule entrée par token, ses renforts ne sont pas recopiés
+            skip(&mut line, "renfort (déjà entré)");
         } else if f.buy {
-            let p = if self.his_value > 0.0 { f.usd / self.his_value } else { 0.0 };
-            let (my_value, _) = self.real.value(&self.marks);
-            let usd = sizing::buy_usd(f.usd, self.his_value, my_value, self.real.cash, self.cfg.k, self.cfg.max_order_usd);
+            let p = f.usd / self.his_value;
+            let m = sizing::stake_frac(p, &self.cfg.tiers);
             line["p"] = json!(p);
-            line["m"] = json!(sizing::stake_frac(p, self.cfg.k));
-            line["my_usd"] = json!(usd);
+            line["m"] = json!(m);
             match bk.asks.first() {
                 None => skip(&mut line, "aucun ask"),
-                Some(&(ask, _)) if usd <= 0.0 || usd / ask < bk.min_size => skip(&mut line, "sous le minimum"),
+                Some(_) if m <= 0.0 => skip(&mut line, "sous le premier palier"),
                 Some(&(ask, _)) => {
+                    let usd = sizing::buy_usd(f.usd, self.his_value, self.real.value(&self.marks).0, self.real.cash, &self.cfg.tiers, bk.min_size * ask, self.cfg.max_order_usd);
+                    if usd <= 0.0 { skip(&mut line, "cash insuffisant pour le minimum"); return self.done(line, lat); }
+                    line["my_usd"] = json!(usd);
+                    self.entered.insert(f.token.clone());
                     let limit = book::buy_limit(ask, self.cfg.max_slippage, bk.tick);
                     line["decision"] = json!("buy");
                     line["asked"] = json!(ask);
@@ -255,8 +273,7 @@ impl Bot {
                 }
             }
         }
-        line["lat"] = lat;
-        self.log(line);
+        self.done(line, lat);
     }
 
     /// Exécution réelle (live) ou remplissage sur le carnet réel observé (paper) : (parts, $).
@@ -300,7 +317,7 @@ impl Bot {
                 None if ts * 1000 + 10_000 < now => {
                     self.by_tx.insert(tx.clone(), (tok.clone(), buy, size));
                     self.checked.insert(tx.clone());
-                    self.on_fill(chain::Fill { tx, log_index: u64::MAX, block: 0, token: tok, buy, usd, shares: size }, "data-api", now, Some(ts * 1000)).await;
+                    self.on_fill(chain::Fill { tx, log_index: u64::MAX, token: tok, buy, usd, shares: size }, "data-api", now).await;
                 }
                 None => {}
             }
@@ -369,18 +386,22 @@ fn run(path: &str) {
                 adapter_polymarket::account::read_balance(&r).expect("live : solde illisible") as f64 / 1e6
             }
         };
-        let his_pos = adapter_polymarket::account::holdings(&cfg.wallet, T, 40).await.unwrap_or_default()
+        let his_pos: HashMap<String, f64> = adapter_polymarket::account::holdings(&cfg.wallet, T, 40).await.unwrap_or_default()
             .into_iter().map(|h| (h.token, h.shares as f64 / 1e6)).collect();
         let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel();
         let (_cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
-        tokio::spawn(feed::run_with(Box::new(chain::Logs { url: cfg.rpc_ws.clone(), wallet: cfg.wallet.clone() }), 0, 0, vec![], clock.clone(), cmd_rx, out_tx, true));
+        tokio::spawn(feed::run_with(Box::new(chain::Logs { url: cfg.rpc_ws.clone(), wallet: cfg.wallet.clone() }), 0, 0, vec![], clock.clone(), cmd_rx, out_tx.clone(), true));
+        // source 1 : les trades publics des tokens qu'il détient (heure du match) ; un marché calme peut se taire 30 s
+        let subscribed: HashSet<String> = his_pos.iter().filter(|(_, s)| **s > 0.0).map(|(t, _)| t.clone()).collect();
+        let (market_cmd, market_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(feed::run_tuned(Box::new(Market), 1, 0, subscribed.iter().cloned().collect(), clock.clone(), market_rx, out_tx, false, Timing::default(), Duration::from_secs(30), Some(Duration::from_secs(10))));
         let mut bot = Bot {
             his_value: 0.0, his_pos, obs: Account::new(real_cash), dem: Account::new(real_cash), real: Account::new(real_cash),
-            marks: BTreeMap::new(), market_of: HashMap::new(), heads: BTreeMap::new(), seen_logs: HashSet::new(), by_tx: HashMap::new(), checked: HashSet::new(),
+            marks: BTreeMap::new(), market_of: HashMap::new(), matched: HashMap::new(), subscribed, market_cmd, seen_logs: HashSet::new(), by_tx: HashMap::new(), checked: HashSet::new(), entered: HashSet::new(),
             start_ms, live, journal, clock: clock.clone(), cfg,
         };
         bot.minute().await;
-        let line = json!({ "t": "start", "mode": bot.cfg.mode, "wallet": bot.cfg.wallet, "k": bot.cfg.k, "cash": real_cash, "his_value": bot.his_value, "his_positions": bot.his_pos.len() });
+        let line = json!({ "t": "start", "mode": bot.cfg.mode, "wallet": bot.cfg.wallet, "tiers": bot.cfg.tiers, "cash": real_cash, "his_value": bot.his_value, "his_positions": bot.his_pos.len() });
         bot.log(line);
         let mut poll = tokio::time::interval(Duration::from_secs(5));
         let mut minute = tokio::time::interval(Duration::from_secs(60));
@@ -389,18 +410,17 @@ fn run(path: &str) {
         loop {
             tokio::select! {
                 m = out_rx.recv() => match m {
-                    Some(Out::Frame { at, text, .. }) => match chain::read(&text) {
-                        chain::Frame::Head { block, ts_s } => { bot.heads.insert(block, ts_s); while bot.heads.len() > 500 { bot.heads.pop_first(); } }
-                        chain::Frame::Fill(f) => {
-                            if !bot.seen_logs.insert((f.tx.clone(), f.log_index)) { continue; }
-                            let e = bot.by_tx.entry(f.tx.clone()).or_insert((f.token.clone(), f.buy, 0.0));
-                            e.2 += f.shares;
-                            let src = bot.heads.get(&f.block).map(|s| s * 1000);
-                            bot.on_fill(f, "chain", at.wall_ns / 1_000_000, src).await;
-                        }
-                        chain::Frame::Other => {}
+                    Some(Out::Frame { at, text, .. }) => if let chain::Frame::Fill(f) = chain::read(&text) {
+                        if !bot.seen_logs.insert((f.tx.clone(), f.log_index)) { continue; }
+                        let e = bot.by_tx.entry(f.tx.clone()).or_insert((f.token.clone(), f.buy, 0.0));
+                        e.2 += f.shares;
+                        bot.on_fill(f, "chain", at.wall_ns / 1_000_000).await;
                     },
-                    Some(Out::Health { health, .. }) => bot.log(json!({ "t": "feed", "health": format!("{health:?}") })),
+                    Some(Out::Event(e)) => if let (Payload::Trade { id, .. }, Some(ms)) = (e.payload, e.event_ms) {
+                        if bot.matched.len() > 100_000 { bot.matched.clear(); }
+                        bot.matched.entry(id.to_lowercase()).or_insert(ms);
+                    },
+                    Some(Out::Health { source, health, .. }) => bot.log(json!({ "t": "feed", "source": if source == 0 { "chain" } else { "market" }, "health": format!("{health:?}") })),
                     Some(_) => {}
                     None => { bot.log(json!({ "t": "halt", "reason": "flux on-chain fermé" })); break; }
                 },

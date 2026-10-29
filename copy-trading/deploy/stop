@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# stop : arret propre du bot (paper : service systemd desactive ; live : SIGTERM au process), puis verification :
+# plus aucun process, ligne "stop" ecrite dans le journal, verrou live supprime par le bot lui-meme.
+# Usage : stop [--yes]
+set -uo pipefail
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+ASSUME_YES=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --yes|-y) ASSUME_YES=1 ;;
+    -h|--help) sed -n '2,4p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "option inconnue : $1 (voir --help)" ;;
+  esac
+  shift
+done
+load_env
+title "stop : copy-trading sur $SSH_DEST"
+check_conn
+installed || die "copy-trading n'est pas installe sur ce serveur (rien a arreter)"
+S=$(svc_state); P=$(live_pid)
+info "etat : $(state_line)"
+if [ "$S" != active ] && [ -z "$P" ]; then
+  rroot "systemctl disable $UNIT 2>/dev/null; true" >/dev/null
+  ok "rien ne tourne"; exit 0
+fi
+confirm "arreter le bot ?" || { info "annule."; exit 1; }
+STOPS=$(rsh "grep -c \"\\\"t\\\":\\\"stop\\\"\" $R_JOURNAL 2>/dev/null; true" | head -1); STOPS=${STOPS:-0}
+[ "$S" = active ] && { rroot "systemctl disable --now $UNIT" >/dev/null 2>&1 || die "systemctl disable --now $UNIT"; }
+[ -n "$P" ] && rroot "kill -TERM $P"
+for i in $(seq 1 20); do
+  [ -z "$(live_pid)" ] && [ "$(svc_state)" != active ] && break
+  printf '\r\033[K  '; bar "$i" 20 30; sleep 1
+done
+printf '\r\033[K'
+[ -z "$(live_pid)" ] && [ "$(svc_state)" != active ] || die "le bot tourne encore apres 20 s : $(state_line)"
+ok "plus aucun process copy-trading"
+N=$(rsh "grep -c \"\\\"t\\\":\\\"stop\\\"\" $R_JOURNAL; true" | head -1)
+[ "${N:-0}" -gt "$STOPS" ] && ok "arret propre ecrit dans le journal : $(rsh "grep \"\\\"t\\\":\\\"stop\\\"\" $R_JOURNAL | tail -n 1")" || warn "pas de ligne stop dans le journal (arret non propre ?)"
+if lock_present; then warn "le verrou live est reste en place : le prochain start live demandera confirmation"; else ok "pas de verrou live"; fi
+info "etat : $(state_line)"

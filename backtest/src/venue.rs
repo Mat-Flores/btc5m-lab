@@ -131,13 +131,17 @@ pub struct WindowVenue<'a> {
     exits: Vec<Exit>,
     next_exit: usize,
     rng: Rng,
+    /// Shares held per side (bid fills less exits sold): a sale beyond them is refused, as the venue refuses a sell
+    /// order above the balance. sim.mjs booked its exits at the decision and could not sell twice; arriving later,
+    /// a second exit decided while the first is on its way would sell shares already sold.
+    held: [f64; 2],
 }
 
 impl<'a> WindowVenue<'a> {
     /// `start`: the window's open (s), seeds the exit holds as sim.mjs (`rng((start ^ seed) >>> 0)`).
     pub fn new(cfg: &'a VenueCfg, start: u64, end_ms: f64, labels: Option<&'a [f32]>) -> WindowVenue<'a> {
         WindowVenue { cfg, end_ms, labels, book: Book::default(), last_book_t: f64::NEG_INFINITY, snap_t: f64::NAN, prev_bid: [-1, -1], prev_size: [0.0, 0.0],
-            hist: [vec![], vec![]], orders: vec![], exits: vec![], next_exit: 0, rng: Rng::new(((start as u32) as i32 ^ cfg.taker_hold.seed as i32) as u32) }
+            hist: [vec![], vec![]], orders: vec![], exits: vec![], next_exit: 0, rng: Rng::new(((start as u32) as i32 ^ cfg.taker_hold.seed as i32) as u32), held: [0.0; 2] }
     }
 
     /// A post-only bid decided at `t` (`qa` = its level's size at the decision): live from `t + one_way_ms`.
@@ -172,6 +176,7 @@ impl<'a> WindowVenue<'a> {
         let shares = jmin(shares, o.r);
         if !(shares > 1e-9) { return; }
         o.r -= shares;
+        self.held[o.s] += shares;
         out.push((id, shares, ts));
     }
 
@@ -228,12 +233,16 @@ impl<'a> WindowVenue<'a> {
         self.exits.swap(self.next_exit, k);
         self.next_exit += 1;
         let (mut sold, mut got) = (0.0, 0.0);
+        // more than held (tolerance: the strategy's own sums of the same fills): refused whole
+        if x.shares > self.held[x.s] + 0.011 { return (sold, got); }
+        let want = jmin(x.shares, self.held[x.s]);
         let mut i = self.book.best_bid(x.s);
-        while (i as f64) >= jround(x.limit * 1000.0) && sold < x.shares {
+        while (i as f64) >= jround(x.limit * 1000.0) && sold < want {
             let sz = self.book.bid_size(x.s, i);
-            if sz > 0.0 { let q = jmin(sz, x.shares - sold); sold += q; got += q * i as f64 / 1000.0; }
+            if sz > 0.0 { let q = jmin(sz, want - sold); sold += q; got += q * i as f64 / 1000.0; }
             i -= 1;
         }
+        self.held[x.s] -= sold;
         (sold, got)
     }
 }

@@ -17,9 +17,9 @@ pub fn report(journal: &str) -> String {
     let start = of("start").last();
     let span = |k: &str| rows.iter().filter_map(|r| r["at"].as_u64()).fold(None, |a: Option<u64>, x| Some(if k == "min" { a.map_or(x, |a| a.min(x)) } else { a.map_or(x, |a| a.max(x)) }));
     let mins = match (span("min"), span("max")) { (Some(a), Some(b)) => (b - a) / 60_000, _ => 0 };
-    out.push(format!("copy-trading — mode {} — wallet {} — K {} — {} min de journal",
+    out.push(format!("copy-trading — mode {} — wallet {} — paliers {} — {} min de journal",
         start.map_or("?".into(), |s| s["mode"].as_str().unwrap_or("?").to_string()), start.map_or("?".into(), |s| s["wallet"].as_str().unwrap_or("?").to_string()),
-        start.map_or("?".into(), |s| s["k"].to_string()), mins));
+        start.map_or("?".into(), |s| s["tiers"].to_string()), mins));
     let trades: Vec<&Value> = of("trade").collect();
     let mut why: BTreeMap<String, usize> = BTreeMap::new();
     for t in trades.iter().filter(|t| t["decision"] == "skip") { *why.entry(t["reason"].as_str().unwrap_or("?").to_string()).or_default() += 1; }
@@ -53,7 +53,7 @@ mod tests {
     #[test]
     fn short_report_with_unmeasured_segments_named() {
         let j = [
-            r#"{"t":"start","at":0,"mode":"paper","wallet":"0xf031","k":100.0}"#,
+            r#"{"t":"start","at":0,"mode":"paper","wallet":"0xf031","tiers":[[0.00001,0.03]]}"#,
             r#"{"t":"trade","at":1000,"src":"chain","decision":"buy","lat":{"src":0,"obs":1800,"dec":1840,"sent":null,"ack":null,"fill":null}}"#,
             r#"{"t":"trade","at":2000,"src":"chain","decision":"skip","reason":"sous le minimum","lat":{"src":0,"obs":2000,"dec":2030}}"#,
             r#"{"t":"trade","at":3000,"src":"data-api","decision":"skip","reason":"sous le minimum","lat":{"src":null,"obs":21000,"dec":21040}}"#,

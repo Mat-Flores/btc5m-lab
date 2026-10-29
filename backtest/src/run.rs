@@ -173,13 +173,15 @@ pub struct TraceVenue {
     last_change: HashMap<String, i64>,
     events: Vec<(i64, VenueEvent)>,
     trades: u64,
+    /// Shares held per token (bid and FAK buy fills less sales): a sale beyond them is refused, as the venue does.
+    held: HashMap<String, Micro>,
 }
 
 impl TraceVenue {
     pub fn new(cfg: VenueCfg) -> TraceVenue {
         let seed = cfg.taker_hold.seed;
         TraceVenue { cfg, books: engine_app::engine::new_books(u64::MAX), rng: Rng::new(seed), live: HashMap::new(), markets: HashMap::new(), other: HashMap::new(), traded: HashMap::new(),
-            last_change: HashMap::new(), events: vec![], trades: 0 }
+            last_change: HashMap::new(), events: vec![], trades: 0, held: HashMap::new() }
     }
 
     pub fn window(&mut self, w: &Window) {
@@ -202,12 +204,14 @@ impl TraceVenue {
         due.sort();
         for (at, n) in due {
             let Some(Live::Fak { token, buy, amount, limit, .. }) = self.live.remove(&n) else { continue };
+            let held = self.held.get(&token).copied().unwrap_or(0);
+            if !buy && amount > held + 10_000 { self.events.push((at, VenueEvent::Answer { n, input: Input::Rejected { killed: false, reason: "not enough balance".into() } })); continue; }
             let lv = match self.books.get(&token).filter(|b| b.usable()) {
                 Some(b) if buy => adapter_polymarket::paper::buy(b, amount, limit),
                 Some(b) => adapter_polymarket::paper::sell(b, amount, limit),
                 None => vec![],
             };
-            for (p, s) in lv { self.fill(n, at, &token, p, s, false); }
+            for (p, s) in lv { *self.held.entry(token.clone()).or_insert(0) += if buy { s } else { -s }; self.fill(n, at, &token, p, s, false); }
             self.events.push((at, VenueEvent::Closed { n }));
         }
         // bids whose cancel took effect
@@ -261,7 +265,7 @@ impl TraceVenue {
             let take = take.min(o.r);
             if take > 1e-9 { o.r -= take; fills.push((*n, token.clone(), m(o.q), m(take))); }
         }
-        for (n, token, p, s) in fills { self.fill(n, t, &token, p, s, true); }
+        for (n, token, p, s) in fills { *self.held.entry(token.clone()).or_insert(0) += s; self.fill(n, t, &token, p, s, true); }
     }
 }
 

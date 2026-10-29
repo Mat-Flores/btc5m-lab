@@ -1,0 +1,32 @@
+# Unit du mode PAPER (installee par setup.sh, activee et demarree par deploy/start quand on choisit paper).
+# Le mode LIVE ne passe jamais par systemd : il a besoin de la phrase secrete a chaque demarrage (stdin via ssh) et ne
+# doit pas repartir seul apres un crash ou un redemarrage.
+[Unit]
+Description=copy-trading (paper)
+After=network-online.target chrony.service
+Wants=network-online.target
+
+[Service]
+User=copyt
+Group=copyt
+WorkingDirectory=/var/lib/copy-trading
+ExecStart=/opt/copy-trading/bin/copy-trading run /var/lib/copy-trading/config.json
+StandardInput=null
+StandardOutput=append:/var/lib/copy-trading/run.log
+StandardError=append:/var/lib/copy-trading/run.log
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=20
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/copy-trading
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target
