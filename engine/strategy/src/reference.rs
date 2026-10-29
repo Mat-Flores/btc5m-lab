@@ -94,6 +94,11 @@ pub struct Config {
     pub rtt_share: f64,
     /// `extraMs` of the simulated account's latency profile (0 for the realistic account).
     pub extra_ms: f64,
+    /// `new Vol()` of the old engine (src/core/model.js `Vol(window, floor, prior)`): 1-second changes kept, sigma
+    /// floor and prior ($/√s).
+    pub vol_window: usize,
+    pub vol_floor: f64,
+    pub vol_prior: f64,
 }
 
 /// What the old engine emits for its account, in order (the fields the parity check compares).
@@ -112,7 +117,8 @@ impl Default for Config {
         Config { source: String::new(), paused: false, off: false, min_edge: 0.10, min_fair: 0.60, jump: 0.20, sigma_mult: 1.5, lookback: 5.0,
             min_tau: 5.0, max_tau: 300.0, cooldown_ms: 2000.0, max_entries_per_window: 1.0, bankroll: 1000.0, stake_usd: 100.0, max_open: 0.0,
             max_open_frac: 0.5, daily_stop_frac: 0.3, exit: Exit::Hold, take_profit: 0.02, max_hold_sec: 60.0, exit_slippage: 0.03, sign_ms: 3.0,
-            match_ms: 10.0, default_rtt_ms: 150.0, rtt_share: 1.0, extra_ms: 0.0 }
+            match_ms: 10.0, default_rtt_ms: 150.0, rtt_share: 1.0, extra_ms: 0.0,
+            vol_window: 300, vol_floor: 1.0, vol_prior: 8.0 }
     }
 }
 
@@ -304,10 +310,11 @@ pub struct Reference {
 impl Reference {
     pub fn new(cfg: Config) -> Self {
         let bankroll = cfg.bankroll;
+        let vol = Vol::with(cfg.vol_window, cfg.vol_floor, cfg.vol_prior);
         Reference {
             cfg, t: f64::NEG_INFINITY, offset: 0.0, first_t: f64::NAN, next_sec: f64::NAN, seq: 0, timers: Vec::new(),
             px: f64::NAN, px_t: f64::NAN, basis: f64::NAN, px_seen: false, hist: VecDeque::new(), cl_buf: VecDeque::new(),
-            vol: Vol::new(), rtt: Rolling { a: VecDeque::new() }, books: HashMap::new(), windows: Vec::new(), cur: None,
+            vol, rtt: Rolling { a: VecDeque::new() }, books: HashMap::new(), windows: Vec::new(), cur: None,
             ring: Vec::new(), ring_head: 0, ring_sorted: true, last_signal: [f64::NEG_INFINITY; 2], fair_now: f64::NAN,
             cash: bankroll, day: None, day_start: bankroll, inflight: 0, consumed: HashMap::new(), positions: Vec::new(),
             entries: HashMap::new(), records: Vec::new(),

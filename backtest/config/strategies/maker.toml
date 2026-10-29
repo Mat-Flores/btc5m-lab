@@ -1,0 +1,104 @@
+# Stratégie « maker » — offres post-only d'achat sur Up ET Down d'une fenêtre BTC 5 min.
+#
+# Code : engine/strategy/src/maker.rs (cœur de décision, une instance par fenêtre) et
+# engine/app/src/strategies/maker.rs (branchement au contrat Strategy de l'engine). Portage opération par opération
+# de `simWindow`/`decide` de engine/maker-bt/sim.mjs (dépôt btc5m-lag-sim), validé bit à bit.
+#
+# Principe : à chaque événement (prix du spot, impression Chainlink, changement du carnet, chaque seconde pleine), la
+# stratégie calcule la probabilité que Up gagne (juste valeur), puis pose sur chaque côté une offre d'achat
+# post-only (jamais exécutable immédiatement) au prix « probabilité − décalage », arrondi au tick, sous le meilleur
+# ask. Elle garde sa place dans la file tant que le prix voulu ne change pas ; sinon elle annule et repose.
+# Juste valeur = celle de l'ancien moteur (src/core/engine.js) : spot moins une base EMA vers Chainlink, strike =
+# moyenne Chainlink des 60 s avant l'ouverture, sigma = volatilité réalisée à 1 s sur 300 s × sigmaMult, chemin
+# Chainlink connu sur les 60 dernières secondes (règlement par TWAP 60 s).
+# Capital (run.mjs) : mise = f × capital LIBRE à la première décision après entryFrom, moitié par côté ; ce qui est
+# dépensé reste bloqué jusqu'à la fin de la fenêtre ; le gain revient à la fin + `claim`.
+#
+# Valeurs : TOUTES égales aux défauts du code (DEFAULTS de sim.mjs:42-77 et constantes sorties du code), vérifié par
+# le test `default_configuration_is_valid_and_its_strategy_files_read` (backtest/src/config.rs). Le backtest les
+# surcharge par `strategy.base` de config/default.json (par défaut : spot Binance à la ms, sigmaMult 1,3), puis par
+# les candidats. Les paramètres facultatifs (absents par défaut, `null` dans sim.mjs) sont en commentaire : TOML n'a
+# pas de null ; les décommenter les active.
+# Unités : prix et probabilités en fraction de 1 $ (0..1) ; tailles en parts ; temps en secondes sauf suffixe Ms.
+
+# ---------------------------------------------------------------- mise et prix
+name = ""            # libellé libre du candidat (repris dans les rapports)
+f = 0.05             # fraction du capital libre misée par fenêtre, moitié sur chaque côté
+# shares = 10        # au lieu de f : parts fixes par côté (C4) ; le capital n'est alors pas lu
+prob = "fair"        # probabilité de Up : "fair" (juste valeur ci-dessus) | "vwap" (trades preneurs publics des 5 dernières s,
+                     # packs seulement) | "mid" (milieu du carnet Up, comme arcsine)
+sigmaMult = 1.5      # multiplicateur de sigma. 1,5 = défaut historique (sous-confiant avec OKX) ; calibré : ×1,0 OKX,
+                     # ×1,3 Binance spot/perp à la ms, ×1,2 composite perp+Coinbase (docs/simulateur-maker.md §7)
+requote = "follow"   # "follow" : le prix suit la probabilité | "freeze" : premier prix gardé toute la fenêtre
+spot = "okx"         # série du spot dans les packs : "okx" (mid OKX enregistré, creux : 25-1 300 prix par fenêtre) |
+                     # "spot" | "perp" (trades Binance à la ms, data/binance/aggTrades) | "perp+coinbase" (moyenne, mixPx).
+                     # Sur traces, la source du prix est `strategy.sources.price` (signal de config/default.json).
+spotLatency = 120.0  # ms entre un trade Binance et sa réception, avec spot "spot"/"perp" (mesuré pour OKX→Dublin,
+                     # NON vérifié pour Binance [à vérifier])
+exitSlip = 0.05      # sorties preneuses : limite FAK = probabilité − exitSlip
+mergeHold = true     # une paire Up+Down remplie coûtant < 1 est gardée au règlement (pas de TP/SL dessus)
+entryFrom = 10.0     # première offre, s après l'ouverture
+quoteEnd = 10.0      # aucune offre dans les quoteEnd dernières secondes
+volMin = 0.0         # filtre : sigma ($/√s, 300 s) à l'ouverture ≥ volMin, sinon fenêtre arrêtée (`vol`)
+# volMax = 20.0      # filtre : sigma à l'ouverture ≤ volMax
+minPrevVolume = 0.0  # filtre : volume preneur public (parts) de la fenêtre précédente (packs seulement ; sur traces,
+                     # une valeur > 0 fait sauter toutes les fenêtres : le tape n'est pas lu en ligne)
+# dailyStop = 0.3    # plus de nouvelle fenêtre une fois la perte du jour ≥ cette fraction du capital de début de jour
+liqCap = true        # plafonne chaque côté à la profondeur des bids dans [q − 0,05 ; q] à la première offre
+reserveInFlight = false  # dimensionne une offre net des offres remplacées qui peuvent encore être remplies
+                         # (aller simple + retenue + 1 s)
+
+# ---------------------------------------------------------------- leviers facultatifs (désactivés par défaut)
+# pull = { J = 20.0, S = 2.0 }      # retire les deux offres tant que |spot(t) − spot(t − S)| > J $, et S s après
+# pullSide = { J = 20.0, S = 2.0 }  # pas d'offre du côté contre lequel le spot a bougé de plus de J $ en S s
+# cancelLoser = { X = 60.0, Y = 0.9 }  # à partir de fin − X s, annule le côté dont la probabilité opposée > Y
+# tp = 0.05                         # take profit ($/part sur la probabilité, contre le prix moyen d'entrée), sortie preneuse
+# sl = 0.10                         # stop loss, idem ; les sorties sont des FAK livrées à leur arrivée (décision D6)
+# join = 1.0                        # price.mode "book" : nombre de ticks sous le meilleur bid
+# sideProb = [0.88, 0.999]          # ne cote un côté que si sa probabilité est dans [lo, hi]
+# maxDiverge = 0.08                 # pas d'offre tant que |probabilité − milieu du carnet| > maxDiverge
+# noKnife = { T = 5.0, M = 0.1 }    # pas d'offre sur un côté dont la juste valeur a chuté de plus de M en T s
+# maxImbalance = 50.0               # pas d'offre sur un côté qui détient maxImbalance parts de plus que l'autre
+# pairEdge = 0.02                   # une fois l'autre côté détenu au coût moyen c : offre ≤ 1 − c − pairEdge
+# orderShares = 5.0                 # avec shares : taille de chaque ordre posé (répliques de wallets)
+# life = 600.0                      # ms : un ordre plus vieux est annulé et reposé (fin de file), comme arcsine
+# script = { s = 0, q = 0.45, r = 10.0, j = 0.0 }  # validate.mjs : un ordre imposé, aucune décision (outil de validation)
+
+# ---------------------------------------------------------------- constantes de l'exchange lues par la stratégie
+# En backtest, ces quatre valeurs sont REMPLACÉES par celles de `venue` (config/default.json) : la stratégie doit
+# voir le même exchange que le simulateur.
+minSize = 5.0        # MIN_SIZE : taille minimale d'un ordre (parts) ; aucune offre en dessous
+silenceMs = 3000.0   # SILENCE_MS : aucune décision tant que le carnet est muet depuis plus longtemps (ms)
+oneWay = 12.2        # ONE_WAY : aller simple décision → effet (ms), pour reserveInFlight
+delay = 0.15         # retenue du preneur (s), pour reserveInFlight ; le défaut du code est celui de sim.mjs (0,15),
+                     # le backtest y met venue.fill_lookback_ms / 1000 (0)
+
+# ---------------------------------------------------------------- constantes de fenêtre (sorties du code, inchangées)
+endMs = 300000.0         # END : fin de fenêtre, ms après l'ouverture
+loopAfterEndMs = 2500.0  # T_END = END + 2 500 ms : la boucle de la fenêtre s'arrête au-delà
+tapeSeconds = 361        # K de tapePath : secondes du tape VWAP, de 60 s avant l'ouverture à la fin (prob "vwap")
+volWindow = 300          # Vol(300) : nombre de variations à 1 s gardées pour sigma
+volFloor = 1.0           # plancher de sigma ($/√s)
+volPrior = 8.0           # sigma avant 30 variations ($/√s)
+horizonS = 300           # horizon pour lequel ces constantes sont écrites : un autre horizon de marché est refusé
+keepMs = 360000.0        # prix et impressions gardés (ms) pour une fenêtre apprise après eux (les packs : 360 s avant l'ouverture)
+
+# ---------------------------------------------------------------- capital (règle de run.mjs)
+# En backtest, REMPLACÉS par capital.start_usd et capital.claim_s de config/default.json.
+capital0 = 1000.0    # capital libre au départ ($)
+claim = 0.0          # s entre la fin d'une fenêtre et la disponibilité de son gain (0 : [à vérifier], délai réel inconnu)
+
+# ---------------------------------------------------------------- prix de l'offre (tables TOML : en fin de fichier,
+# toute clé écrite après un en-tête [table] appartient à cette table)
+[price]
+mode = "offset"      # "offset" : probabilité − offset | "fixed" : prix fixe | "book" : meilleur bid − join ticks, gardé
+                     # s'il reste ≤ probabilité − offset | "penny" : meilleur bid + 1 tick, ≤ probabilité − offset
+offset = 0.03        # décalage sous la probabilité ($/part)
+fixed = 0.45         # prix du mode "fixed"
+
+# ---------------------------------------------------------------- sources lues (noms de la config des sources)
+# En backtest, REMPLACÉES par strategy.sources de config/default.json.
+[sources]
+price = "okx"        # prix du spot (Quote : milieu bid/ask, envoyé quand il change)
+oracle = "chainlink" # impressions Chainlink (Oracle, horodatage d'observation)
+book = "polymarket"  # carnets Polymarket (le carnet Up ; Down = son miroir)

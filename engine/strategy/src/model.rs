@@ -114,7 +114,8 @@ fn fair_up_with(spot: f64, strike: f64, tau: f64, sigma: f64, twap: f64, known_s
     cdf((mean - strike) / sd)
 }
 
-/// Realised volatility of 1-second changes over a rolling window, with a floor and a prior.
+/// Realised volatility of 1-second changes over a rolling window, with a floor and a prior
+/// (`new Vol(window, floor, prior)` of src/core/model.js; its defaults 300, 1, 8 are the strategies' configuration).
 #[derive(Clone)]
 pub struct Vol {
     d: Vec<f64>,
@@ -122,32 +123,29 @@ pub struct Vol {
     i: usize,
     s2: f64,
     last: f64,
+    window: usize,
+    floor: f64,
+    prior: f64,
 }
 impl Vol {
-    const WINDOW: usize = 300;
-    const FLOOR: f64 = 1.0;
-    const PRIOR: f64 = 8.0;
-    pub fn new() -> Self {
-        Vol { d: vec![0.0; Self::WINDOW], n: 0, i: 0, s2: 0.0, last: f64::NAN }
+    /// `window`: number of 1-second changes kept; `floor`, `prior` ($/√s): lowest sigma, sigma before 30 changes.
+    pub fn with(window: usize, floor: f64, prior: f64) -> Self {
+        Vol { d: vec![0.0; window], n: 0, i: 0, s2: 0.0, last: f64::NAN, window, floor, prior }
     }
     pub fn push(&mut self, price: f64) {
         if self.last.is_finite() && price.is_finite() {
             let x = price - self.last;
-            if self.n == Self::WINDOW { self.s2 -= self.d[self.i] * self.d[self.i]; } else { self.n += 1; }
+            if self.n == self.window { self.s2 -= self.d[self.i] * self.d[self.i]; } else { self.n += 1; }
             self.d[self.i] = x;
             self.s2 += x * x;
-            self.i = (self.i + 1) % Self::WINDOW;
+            self.i = (self.i + 1) % self.window;
         }
         if price.is_finite() { self.last = price; }
     }
     pub fn sigma(&self) -> f64 {
-        if self.n < 30 { return jmax(Self::FLOOR, Self::PRIOR); }
-        jmax(Self::FLOOR, (jmax(0.0, self.s2) / self.n as f64).sqrt())
+        if self.n < 30 { return jmax(self.floor, self.prior); }
+        jmax(self.floor, (jmax(0.0, self.s2) / self.n as f64).sqrt())
     }
-}
-
-impl Default for Vol {
-    fn default() -> Self { Self::new() }
 }
 
 #[cfg(test)]

@@ -1,0 +1,3 @@
+{
+  "strategy": { "kind": "reference", "file": "strategies/reference.toml", "base": null }
+}

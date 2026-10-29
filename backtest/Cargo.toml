@@ -1,0 +1,27 @@
+[package]
+name = "backtest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Paquet autonome (hors workspace de l'engine) : il exécute le code de l'engine par chemins.
+[workspace]
+
+[[bin]]
+name = "backtest"
+path = "src/main.rs"
+
+[dependencies]
+engine-core = { path = "../engine/core" }
+engine-app = { path = "../engine/app" }
+engine-strategy = { path = "../engine/strategy" }
+adapter-polymarket = { path = "../engine/adapters/polymarket" }
+serde = { version = "1", features = ["derive"] }
+# float_roundtrip : chaque nombre lu donne le même double que JSON.parse de JavaScript (parité bit à bit)
+serde_json = { version = "1", features = ["float_roundtrip"] }
+# seule dépendance nouvelle autorisée : les fichiers de stratégie commentés (config/strategies/*.toml)
+toml = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true

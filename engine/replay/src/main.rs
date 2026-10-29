@@ -39,6 +39,8 @@ fn config(src: &str, c: &Map<String, Value>) -> Config {
         daily_stop_frac: g("dailyStopFrac"), exit: if c["exit"] == "converge" { Exit::Converge } else { Exit::Hold },
         take_profit: g("takeProfit"), max_hold_sec: g("maxHoldSec"), exit_slippage: g("exitSlippage"), sign_ms: g("signMs"),
         match_ms: g("matchMs"), default_rtt_ms: g("defaultRttMs"), rtt_share: g("rttShare"), extra_ms,
+        // not in the old sessions' configuration: the old engine's own values (`new Vol()`)
+        ..Config::default()
     }
 }
 

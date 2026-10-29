@@ -4,16 +4,13 @@
 //! (`fairAt` and what feeds it) and `decide`. The simulated exchange (fills, queue, retention, look-ahead book of the
 //! exits) is not here: `decide` emits acts, the exchange answers with fills.
 //!
-//! One `Maker` per window, driven like `simWindow`'s loop, times in ms from the open (END = 300 000):
+//! One `Maker` per window, driven like `simWindow`'s loop, times in ms from the open (`endMs` = END = 300 000):
 //! `second(t)` at each whole second, `cl`, `px`, `book` per record; ties in that order (second, cl, px, book).
 //! Exits (tp/sl) differ by design: here a FAK sell is emitted and the position moves when its fill comes back
 //! (`exit_done`), where `sim.mjs` books the result at the decision with a look-ahead book (decision D6).
 use crate::model::{fair_up_js as fair_up, jmax, jmin, jround, Vol};
 use serde::{Deserialize, Serialize};
 
-const END: f64 = 300e3;
-const T_END: f64 = END + 2500.0;
-const K_TAPE: usize = 361;
 
 fn nan() -> f64 { f64::NAN }
 fn infinity() -> f64 { f64::INFINITY }
@@ -85,6 +82,17 @@ pub struct Params {
     /// `ONE_WAY` (ms) and `opts.delay` (s) of the exchange: how long a replaced order may still fill.
     pub one_way: f64,
     pub delay: f64,
+    /// `END` of simWindow: the window's end, ms from its open.
+    pub end_ms: f64,
+    /// `T_END` = END + this: the window's loop stops past it, ms.
+    pub loop_after_end_ms: f64,
+    /// `K` of `tapePath`: seconds of the VWAP tape, from 60 s before the open.
+    pub tape_seconds: usize,
+    /// `new Vol(300)` of simWindow (src/core/model.js `Vol(window, floor, prior)`): 1-second changes kept, sigma floor
+    /// and prior ($/√s).
+    pub vol_window: usize,
+    pub vol_floor: f64,
+    pub vol_prior: f64,
 }
 
 impl Default for Params {
@@ -93,7 +101,8 @@ impl Default for Params {
             pull: None, pull_side: None, spot: "okx".into(), spot_latency: 120.0, cancel_loser: None, tp: None, sl: None, exit_slip: 0.05, merge_hold: true,
             entry_from: 10.0, quote_end: 10.0, vol_min: 0.0, vol_max: None, min_prev_volume: 0.0, daily_stop: None, liq_cap: true, reserve_in_flight: false,
             join: None, side_prob: None, max_diverge: None, no_knife: None, max_imbalance: None, pair_edge: None, order_shares: None, life: None, script: None,
-            min_size: 5.0, silence_ms: 3000.0, one_way: 12.2, delay: 0.15 }
+            min_size: 5.0, silence_ms: 3000.0, one_way: 12.2, delay: 0.15, end_ms: 300e3, loop_after_end_ms: 2500.0, tape_seconds: 361,
+            vol_window: 300, vol_floor: 1.0, vol_prior: 8.0 }
     }
 }
 
@@ -141,12 +150,13 @@ impl Book {
     pub fn ask_size(&self, s: usize, i: i64) -> f64 { if s == 0 { Self::at(&self.ask, i) } else { Self::at(&self.bid, 1000 - i) } }
 }
 
-/// Up VWAP of the public taker trades of the last 5 s (`tapePath(...).vwap`), per second -60..300.
+/// Up VWAP of the public taker trades of the last 5 s (`tapePath(...).vwap`), per second -60..(`k_tape` − 61): 361 (`K` of
+/// tapePath) covers -60..300.
 /// rows: [t (s from the open), hit side, price on that side, size] × n, in time order.
-pub fn tape_vwap(rows: &[f64]) -> Vec<f64> {
+pub fn tape_vwap(rows: &[f64], k_tape: usize) -> Vec<f64> {
     let n = rows.len() / 4;
     let o = 60i64;
-    let mut vwap = vec![f64::NAN; K_TAPE];
+    let mut vwap = vec![f64::NAN; k_tape];
     let (mut lo, mut last) = (0usize, f64::NAN);
     for (k, slot) in vwap.iter_mut().enumerate() {
         let sec = (k as i64 - o) as f64;
@@ -237,7 +247,7 @@ pub struct Maker {
     snap_t: f64,
     // loop
     pub next_sec: f64,
-    /// The window stopped (volatility filter) or its loop is over (past END + 2.5 s).
+    /// The window stopped (volatility filter) or its loop is over (past `endMs` + `loopAfterEndMs`).
     pub stopped: bool,
     pub over: bool,
     /// None until the first decision past `entryFrom`; then whether the window is played and its budget.
@@ -251,24 +261,28 @@ pub type Start<'a> = &'a mut dyn FnMut() -> Option<Option<f64>>;
 impl Maker {
     pub fn new(p: Params, fee: Fee, tick0: f64) -> Maker {
         let rebate = fee.rebate_rate * fee.rate;
+        let vol = Vol::with(p.vol_window, p.vol_floor, p.vol_prior);
         Maker {
             p, fee, tick0, rebate, reb_exp: fee.exponent,
             rec: Rec { spent: 0.0, proceeds: 0.0, fees: 0.0, rebates: 0.0, payout: 0.0, capped: [false; 2], why: None, fills: [vec![], vec![]], posted: 0, joins: vec![],
                 cancel_loser_at: None, loser_filled_before: false, pulled: 0, silent_skips: 0, sigma0: f64::NAN, exits: vec![], drift: [0.0; 2], pos_n: [0.0; 2], pnl: 0.0 },
             pos: [Pos::default(); 2], orders: vec![], cur: [None; 2], frozen: [None; 2], side_done: [false; 2], spent_side: [0.0; 2], cap: [infinity(); 2],
             last_exit_sec: [-1.0; 2], pulled_until: f64::NEG_INFINITY, inflight: [vec![], vec![]],
-            vol: Vol::new(), okx: nan(), basis: nan(), strike: nan(), px_hist: vec![], cl_buf: vec![], cl_after_open: false, cl_before_twap: false,
+            vol, okx: nan(), basis: nan(), strike: nan(), px_hist: vec![], cl_buf: vec![], cl_after_open: false, cl_before_twap: false,
             fair_now: nan(), fair_sec: vec![f64::NAN; 312], tape: None,
             book: Book::default(), last_book_t: f64::NEG_INFINITY, snap_t: nan(), next_sec: nan(), stopped: false, over: false, played: None,
         }
     }
 
     /// Public taker rows of the window (`w.trades`), for `prob: 'vwap'`.
-    pub fn set_trades(&mut self, rows: &[f64]) { self.tape = Some(tape_vwap(rows)); }
+    pub fn set_trades(&mut self, rows: &[f64]) { self.tape = Some(tape_vwap(rows, self.p.tape_seconds)); }
+
+    /// `T_END` of simWindow: the loop stops past it.
+    fn t_end(&self) -> f64 { self.p.end_ms + self.p.loop_after_end_ms }
 
     fn tape_at(&self, sec: f64) -> f64 {
         let Some(v) = &self.tape else { return f64::NAN };
-        let i = (sec.floor() + 60.0).clamp(0.0, (K_TAPE - 1) as f64);
+        let i = (sec.floor() + 60.0).clamp(0.0, (v.len() - 1) as f64);
         v[i as usize]
     }
 
@@ -290,19 +304,20 @@ impl Maker {
         let sp = self.spot();
         if !sp.is_finite() || !self.strike.is_finite() { return f64::NAN; }
         let sigma = self.vol.sigma() * self.p.sigma_mult;
-        if t < END - 60e3 { return fair_up(sp, self.strike, (END - t) / 1000.0, sigma, 60.0, 0.0, 0.0); }
-        let (sum, secs, last_ts, _) = self.twap_known(END - 60e3, jmin(t, END));
-        fair_up(sp, self.strike, jmax(0.0, (END - last_ts) / 1000.0), sigma, 60.0, sum, secs)
+        let end = self.p.end_ms;
+        if t < end - 60e3 { return fair_up(sp, self.strike, (end - t) / 1000.0, sigma, 60.0, 0.0, 0.0); }
+        let (sum, secs, last_ts, _) = self.twap_known(end - 60e3, jmin(t, end));
+        fair_up(sp, self.strike, jmax(0.0, (end - last_ts) / 1000.0), sigma, 60.0, sum, secs)
     }
 
     /// Whole seconds due before an input at `t` (a second comes before a record of the same instant).
     fn seconds(&mut self, t: f64, out: &mut Vec<Act>, start: Start) {
         if self.next_sec.is_nan() { self.next_sec = (t / 1000.0).ceil() * 1000.0; }
         while !self.over && self.next_sec <= t {
-            if self.next_sec > T_END { self.over = true; break; }
+            if self.next_sec > self.t_end() { self.over = true; break; }
             self.second(out, start);
         }
-        if t > T_END { self.over = true; }
+        if t > self.t_end() { self.over = true; }
     }
 
     fn second(&mut self, out: &mut Vec<Act>, start: Start) {
@@ -443,7 +458,7 @@ impl Maker {
             if pull && every_sec && (self.cur[0].is_some() || self.cur[1].is_some()) { self.rec.pulled += 1; }
         }
         if let Some(c) = self.p.cancel_loser {
-            if t >= END - 1000.0 * c.x {
+            if t >= self.p.end_ms - 1000.0 * c.x {
                 let loser = if p_up > c.y { 1 } else if 1.0 - p_up > c.y { 0 } else { -1 };
                 if loser >= 0 && !self.side_done[loser as usize] {
                     let l = loser as usize;
@@ -453,7 +468,7 @@ impl Maker {
                 }
             }
         }
-        let q_end = END - 1000.0 * self.p.quote_end;
+        let q_end = self.p.end_ms - 1000.0 * self.p.quote_end;
         for s in 0..2 {
             let o = self.cur[s];
             let mut want: Option<f64> = None;

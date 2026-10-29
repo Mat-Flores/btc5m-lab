@@ -23,17 +23,24 @@ pub fn feed_adapter(kind: &str) -> Option<(Box<dyn Adapter>, bool)> {
 }
 
 /// Both strategies keep the 5-minute window's constants of their origin (reference.rs: windows of 300 s; maker:
-/// END = 300 s, TWAP 60 s): another horizon is refused rather than traded wrong.
-const HORIZON_S: u64 = 300;
+/// END = 300 s, TWAP 60 s): another horizon than the one they are built for (`horizonS`, default 300 s) is refused
+/// rather than traded wrong.
+fn built_for(kind: &str, p: &mut serde_json::Map<String, Value>, m: &MarketSpec) -> Result<(), String> {
+    let h = match p.remove("horizonS") { None => 300, Some(v) => v.as_u64().ok_or(format!("{kind}: horizonS {v}"))? };
+    if m.horizon_s != h { return Err(format!("{kind}: horizon {} s not supported (built for {h} s)", m.horizon_s)); }
+    Ok(())
+}
 
 /// A strategy of a configured `kind`, from its parameters (JSON object).
 /// - "reference": the old engine's configuration keys (`engine_strategy::reference::Config`, camelCase, `source` =
 ///   the price source), plus `oracle` (Chainlink source name, default "chainlink"); `maxTau` defaults to the horizon.
 /// - "maker": `sim.mjs` DEFAULTS names (`engine_strategy::maker::Params`), plus `sources` {price, oracle, book},
-///   `capital0` ($, default 1000) and `claim` (s, default 0) of the capital rule (maker-bt/run.mjs).
+///   `capital0` ($, default 1000) and `claim` (s, default 0) of the capital rule (maker-bt/run.mjs), `keepMs` (ms,
+///   default 360 000: prices and prints kept for a window learnt after they came).
+/// Both: `horizonS`, the horizon they are built for (s, default 300).
 pub fn strategy(kind: &str, params: Value, m: &MarketSpec) -> Result<Box<dyn Strategy>, String> {
     let Value::Object(mut p) = params else { return Err(format!("{kind}: parameters are not an object")) };
-    if matches!(kind, "reference" | "maker") && m.horizon_s != HORIZON_S { return Err(format!("{kind}: horizon {} s not supported (built for {HORIZON_S} s)", m.horizon_s)); }
+    if matches!(kind, "reference" | "maker") { built_for(kind, &mut p, m)?; }
     match kind {
         "reference" => {
             let oracle = match p.remove("oracle") { Some(Value::String(s)) => s, None => "chainlink".into(), Some(v) => return Err(format!("reference: oracle {v}")) };
@@ -47,8 +54,9 @@ pub fn strategy(kind: &str, params: Value, m: &MarketSpec) -> Result<Box<dyn Str
             let num = |v: Option<Value>, d: f64, k: &str| v.map_or(Ok(d), |v| v.as_f64().ok_or(format!("maker: {k} not a number")));
             let capital0 = num(p.remove("capital0"), 1000.0, "capital0")?;
             let claim = num(p.remove("claim"), 0.0, "claim")?;
+            let keep_ms = num(p.remove("keepMs"), 360_000.0, "keepMs")?;
             let params: engine_strategy::maker::Params = serde_json::from_value(Value::Object(p)).map_err(|e| format!("maker: {e}"))?;
-            Ok(Box::new(MakerStrategy::new(params, roles, capital0, claim)))
+            Ok(Box::new(MakerStrategy::new(params, roles, capital0, claim, (keep_ms * 1e6) as u64)))
         }
         _ => Err(format!("unknown strategy {kind}")),
     }
@@ -65,6 +73,10 @@ mod tests {
         let r = strategy("reference", serde_json::json!({ "source": "okx", "minEdge": 0.12 }), &btc).unwrap();
         assert_eq!(r.sources(), vec!["okx", "chainlink"]);
         assert!(strategy("reference", serde_json::json!({ "source": "okx" }), &eth15).is_err());
+        // the horizon a strategy is built for is its configuration (`horizonS`), 300 s unless said
+        assert!(strategy("reference", serde_json::json!({ "source": "okx", "horizonS": 900 }), &eth15).is_ok());
+        assert!(strategy("reference", serde_json::json!({ "source": "okx", "horizonS": 900 }), &btc).is_err());
+        assert!(strategy("maker", serde_json::json!({ "keepMs": 360000, "horizonS": 300, "volWindow": 300, "endMs": 300000 }), &btc).is_ok());
         assert!(strategy("reference", serde_json::json!({ "source": "okx", "typo": 1 }), &btc).is_err());
         assert!(strategy("reference", serde_json::json!({}), &btc).is_err());
         // a candidate of a maker batch file (maker-bt/batches/x01-retest-exact.json), as is

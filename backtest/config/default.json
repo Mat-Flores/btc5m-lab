@@ -1,0 +1,50 @@
+{
+  "name": "default",
+  "market": { "venue": "polymarket", "asset": "btc", "horizon_s": 300 },
+  "period": { "from": null, "to": null, "split": "2026-10-20T00:00:00Z" },
+  "capital": { "start_usd": 1000, "compound": true, "claim_s": 0 },
+  "input": "trace",
+  "trace": { "root": "../../source-tracing/trace", "formats": ["current", "old"] },
+  "pack": {
+    "source_root": "/mnt/c/dev/REA Projects/btc5m-lag-sim",
+    "data_dir": "data",
+    "packs_dir": "engine/maker-bt/packs",
+    "mix_latency_ms": { "perp": 113, "coinbase": 40 }
+  },
+  "sources": [
+    { "name": "polymarket-clob", "adapter": "polymarket-market", "input": { "trace": "polymarket-clob", "recv_lag_ms": 0 } },
+    { "name": "polymarket-gamma", "adapter": "polymarket-gamma", "input": { "trace": "polymarket-gamma", "recv_lag_ms": 0 } },
+    { "name": "chainlink-rtds", "adapter": "chainlink-rtds", "input": { "trace": "chainlink-rtds", "recv_lag_ms": 0 } },
+    { "name": "okx-btc-usdt-swap", "adapter": "okx-bbo-tbt", "input": { "trace": "okx-btc-usdt-swap", "recv_lag_ms": 0 } },
+    { "name": "binance-btcusdt", "adapter": "binance-spot", "input": { "trace": "binance-btcusdt", "recv_lag_ms": 0 } },
+    { "name": "binance-perp-btcusdt", "adapter": "binance-perp", "input": { "trace": "binance-perp-btcusdt", "recv_lag_ms": 0 } },
+    { "name": "coinbase-btc-usd", "adapter": "coinbase", "input": { "trace": "coinbase-btc-usd", "recv_lag_ms": 0 } }
+  ],
+  "signal": { "name": "signal", "sources": ["binance-btcusdt"], "field": "trade", "combine": "mean" },
+  "venue": {
+    "one_way_ms": 12.2,
+    "ack_ms": 0,
+    "taker_hold": { "quantiles_s": [[0, 0.15], [0.1, 0.19], [0.5, 0.36], [0.9, 1.5], [1, 3.5]], "seed": 7 },
+    "fill_bound": "exact",
+    "fill_lookback_ms": 0,
+    "cancel_queue": "pro_rata",
+    "post_only_cross_check": "decision",
+    "silence_ms": 3000,
+    "trading_cutoff_ms_after_end": 2000,
+    "rebates": true,
+    "trade_fail_rate": 0,
+    "consume_own_liquidity": false,
+    "min_size_rule": { "min_shares": 5 }
+  },
+  "variants": [],
+  "engine": { "book_quiet_ms": 200, "windows_kept_s": 3600, "tick_ms": 50 },
+  "strategy": {
+    "kind": "maker",
+    "file": "strategies/maker.toml",
+    "sources": { "price": "signal", "oracle": "chainlink-rtds", "book": "polymarket-clob" },
+    "base": { "spot": "spot", "sigmaMult": 1.3 },
+    "candidates": [],
+    "grid": {}
+  },
+  "out": "../out"
+}

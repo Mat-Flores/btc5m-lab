@@ -45,7 +45,10 @@
       "matchMs": 10.0,
       "defaultRttMs": 150.0,
       "rttShare": 1.0,
-      "extraMs": 0.0
+      "extraMs": 0.0,
+      "volWindow": 300,
+      "volFloor": 1.0,
+      "volPrior": 8.0
     },
     "one_way_ms": 12.2,
     "taker_delay_ms": 150

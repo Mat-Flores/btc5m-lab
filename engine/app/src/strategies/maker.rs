@@ -53,19 +53,19 @@ pub struct MakerStrategy {
     by_n: HashMap<u32, u64>,
     exits: HashMap<u64, (f64, f64)>,
     last_ns: u64,
+    /// Prices and prints are kept this long (ns), for a window learnt after they came (`keepMs`).
+    keep_ns: u64,
     played: u64,
 }
-
-const KEEP_NS: u64 = 360_000_000_000;
 
 fn rel(wall_ns: u64, start: u64) -> f64 { (wall_ns as i128 - start as i128 * 1_000_000_000) as f64 / 1e6 }
 
 impl MakerStrategy {
     /// `capital0`: free capital at the start, $ (run.mjs `capital0`, 1000); `claim`: s between a window's end and its
-    /// payout being free (run.mjs `claim`, 0).
-    pub fn new(p: Params, roles: Roles, capital0: f64, claim_s: f64) -> MakerStrategy {
+    /// payout being free (run.mjs `claim`, 0); `keep_ns`: see the field (360 s: the packs' 360 s before the open).
+    pub fn new(p: Params, roles: Roles, capital0: f64, claim_s: f64, keep_ns: u64) -> MakerStrategy {
         MakerStrategy { p, roles, free: capital0, pending: vec![], claim_s, day: None, day_start: 0.0, wins: vec![], last_mid: f64::NAN, px: VecDeque::new(), cl: VecDeque::new(),
-            next_id: 0, ids: HashMap::new(), by_n: HashMap::new(), exits: HashMap::new(), last_ns: 0, played: 0 }
+            next_id: 0, ids: HashMap::new(), by_n: HashMap::new(), exits: HashMap::new(), last_ns: 0, keep_ns, played: 0 }
     }
 
     /// Runs `f` on window `i`'s core with the capital rule, then turns its acts into decisions.
@@ -178,14 +178,14 @@ impl Strategy for MakerStrategy {
                 if mid == self.last_mid { return; }
                 self.last_mid = mid;
                 self.px.push_back((n, mid));
-                while self.px.front().is_some_and(|x| x.0 + KEEP_NS < n) { self.px.pop_front(); }
+                while self.px.front().is_some_and(|x| x.0 + self.keep_ns < n) { self.px.pop_front(); }
                 for i in 0..self.wins.len() { let t = rel(n, self.wins[i].w.start); if (-360e3..=310e3).contains(&t) { self.drive(i, out, |c, a, s| c.px(t, mid, a, s)); } }
             }
             Payload::Oracle { value } if source == self.roles.oracle => {
                 let Some(ms) = e.event_ms else { return };
                 let p = *value as f64 / 1e6;
                 self.cl.push_back((n, ms as f64, p));
-                while self.cl.front().is_some_and(|x| x.0 + KEEP_NS < n) { self.cl.pop_front(); }
+                while self.cl.front().is_some_and(|x| x.0 + self.keep_ns < n) { self.cl.pop_front(); }
                 for i in 0..self.wins.len() {
                     let start = self.wins[i].w.start;
                     let t = rel(n, start);

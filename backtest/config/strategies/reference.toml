@@ -1,0 +1,49 @@
+# Stratégie « reference » — l'ancien moteur preneur (src/core/engine.js du dépôt btc5m-lag-sim), porté sans changer
+# sa logique : engine/strategy/src/reference.rs, branché au contrat Strategy par engine/app/src/strategies/reference.rs.
+#
+# Principe : à chaque prix du spot, la stratégie calcule la juste valeur de Up (même modèle que la stratégie maker :
+# spot − base EMA vers Chainlink, strike = moyenne Chainlink des 60 s avant l'ouverture, sigma réalisé × sigmaMult) et
+# achète en preneur (ordre FAK) le côté dont la juste valeur, frais preneur déduits, dépasse le meilleur ask d'au moins
+# minEdge, si cette juste valeur a monté d'au moins `jump` en `lookback` s, dans les limites de risque (mise, positions
+# ouvertes, arrêt journalier). Sortie : garder jusqu'au règlement ("hold") ou revendre quand le gain net converge
+# ("converge").
+# Ses remplissages sont ceux de son propre modèle de compte (l'ancien compte « réaliste » : FAK contre le carnet
+# enregistré après signMs + RTT p50 × rttShare + matchMs) : les fills de l'exchange simulé ne lui reviennent pas.
+#
+# Valeurs : TOUTES égales aux défauts du code (DEFAULT_CONFIG de src/core/engine.js, `Config::default` de
+# reference.rs), vérifié par le test `default_configuration_is_valid_and_its_strategy_files_read`, sauf `source`
+# qui n'a pas de défaut (à nommer). En backtest, `source` et `oracle` sont REMPLACÉS par strategy.sources.price et
+# strategy.sources.oracle de config/default.json, et `bankroll` par capital.start_usd.
+# Unités : prix et probabilités en fraction de 1 $ ; montants en $ ; temps en ms sauf mention.
+
+source = "signal"          # nom de la source du prix du spot (aucun défaut dans le code)
+oracle = "chainlink"       # nom de la source Chainlink
+paused = false             # pas de nouvelle entrée
+off = false                # stratégie éteinte
+minEdge = 0.1              # avantage minimal juste valeur − ask − frais preneur par part pour entrer (et limite de prix)
+minFair = 0.6              # juste valeur minimale du côté acheté
+jump = 0.2                 # hausse minimale de la juste valeur du côté sur `lookback` s (0 : pas de condition)
+sigmaMult = 1.5            # multiplicateur de sigma (défaut historique ; calibration selon la source : docs/simulateur-maker.md §7)
+lookback = 5.0             # fenêtre de la hausse `jump` (s)
+minTau = 5.0               # pas d'entrée à moins de minTau s de la fin
+maxTau = 300.0             # pas d'entrée à plus de maxTau s de la fin (défaut du registre : l'horizon du marché)
+cooldownMs = 2000.0        # délai minimal entre deux signaux d'un même côté
+maxEntriesPerWindow = 1.0  # entrées maximales par fenêtre
+bankroll = 1000.0          # capital du compte simulé ($)
+stakeUsd = 100.0           # mise par entrée ($)
+maxOpen = 0.0              # nombre maximal de positions ouvertes + ordres en vol (0 : pas de plafond)
+maxOpenFrac = 0.5          # coût ouvert + mise ≤ maxOpenFrac × capital, sinon pas d'entrée
+dailyStopFrac = 0.3        # arrêt du jour quand la perte atteint cette fraction du capital de début de jour
+exit = "hold"              # "hold" : jusqu'au règlement | "converge" : revente quand le gain net ≥ takeProfit ou après maxHoldSec
+takeProfit = 0.02          # "converge" : gain net par part (bid − prix moyen − frais d'entrée et de sortie) qui déclenche la revente
+maxHoldSec = 60.0          # durée maximale d'une position "converge" (s)
+exitSlippage = 0.03        # revente : limite = bid − exitSlippage, arrondie au tick
+signMs = 3.0               # temps de signature d'un ordre
+matchMs = 10.0             # temps d'appariement côté venue
+defaultRttMs = 150.0       # RTT supposé tant qu'aucun RTT n'est mesuré
+rttShare = 1.0             # part du RTT médian comptée avant l'appariement (1 : aller-retour, l'ancien moteur)
+extraMs = 0.0              # latence ajoutée du profil de compte (0 : compte réaliste)
+volWindow = 300            # Vol() : nombre de variations à 1 s gardées pour sigma
+volFloor = 1.0             # plancher de sigma ($/√s)
+volPrior = 8.0             # sigma avant 30 variations ($/√s)
+horizonS = 300             # horizon pour lequel la stratégie est écrite (fenêtres de 300 s) : un autre est refusé
