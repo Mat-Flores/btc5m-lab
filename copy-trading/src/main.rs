@@ -9,10 +9,10 @@ mod report;
 mod sizing;
 
 use adapter_polymarket::exec::{self, Clob, ALLOWED, HOST};
+use adapter_polymarket::market::Market;
 use adapter_polymarket::sign::{self, Side, Signer};
 use engine_app::arm::Armed;
 use engine_core::clock::Clock;
-use adapter_polymarket::market::Market;
 use engine_core::event::Payload;
 use engine_core::feed::{self, Cmd, Out, Timing};
 use engine_core::guard::NetGuard;
@@ -54,41 +54,76 @@ struct Config {
     rpc_ws: String,
     rpc_http: String,
 }
-fn paper() -> String { "paper".into() }
+fn paper() -> String {
+    "paper".into()
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match (args.get(1).map(String::as_str), args.get(2)) {
         (Some("run"), Some(cfg)) => run(cfg),
         (Some("encrypt"), Some(addr)) => encrypt(addr),
-        (Some("report"), Some(j)) => println!("{}", report::report(&std::fs::read_to_string(j).expect("journal illisible"))),
-        _ => { eprintln!("usage : copy-trading run <config.json> | encrypt <adresse> | report <journal.jsonl>"); std::process::exit(2); }
+        (Some("report"), Some(j)) => println!(
+            "{}",
+            report::report(&std::fs::read_to_string(j).expect("journal illisible"))
+        ),
+        _ => {
+            eprintln!("usage : copy-trading run <config.json> | encrypt <adresse> | report <journal.jsonl>");
+            std::process::exit(2);
+        }
     }
 }
 
 // ---- clé : chiffrement local, jamais en clair ailleurs qu'en mémoire --------------------------------------------------
 
 /// Efface un tampon de façon que le compilateur ne puisse pas l'omettre.
-fn wipe(b: &mut [u8]) { for x in b.iter_mut() { unsafe { std::ptr::write_volatile(x, 0) } } }
-fn urandom<const N: usize>() -> [u8; N] { let mut b = [0u8; N]; std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut b)).expect("/dev/urandom"); b }
+fn wipe(b: &mut [u8]) {
+    for x in b.iter_mut() {
+        unsafe { std::ptr::write_volatile(x, 0) }
+    }
+}
+fn urandom<const N: usize>() -> [u8; N] {
+    let mut b = [0u8; N];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut b))
+        .expect("/dev/urandom");
+    b
+}
 
 fn encrypt(addr: &str) {
-    let ok = addr.len() == 42 && addr.starts_with("0x") && addr[2..].bytes().all(|b| b.is_ascii_hexdigit());
-    if !ok { eprintln!("adresse attendue : 0x + 40 hex (le Deposit Wallet)"); std::process::exit(2); }
+    let ok = addr.len() == 42
+        && addr.starts_with("0x")
+        && addr[2..].bytes().all(|b| b.is_ascii_hexdigit());
+    if !ok {
+        eprintln!("adresse attendue : 0x + 40 hex (le Deposit Wallet)");
+        std::process::exit(2);
+    }
     let mut input = String::with_capacity(4096);
     std::io::stdin().read_to_string(&mut input).expect("stdin");
     let mut lines = input.lines();
-    let (Some(k), Some(pass)) = (lines.next(), lines.next()) else { eprintln!("stdin : clé sur la 1re ligne, phrase sur la 2e"); std::process::exit(2) };
+    let (Some(k), Some(pass)) = (lines.next(), lines.next()) else {
+        eprintln!("stdin : clé sur la 1re ligne, phrase sur la 2e");
+        std::process::exit(2)
+    };
     let hex = k.trim().trim_start_matches("0x");
     let mut key = [0u8; 32];
-    let parsed = hex.len() == 64 && (0..32).all(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).map(|b| key[i] = b).is_ok());
-    let out = parsed.then(|| engine_core::key::encrypt_v1(&key, pass, &urandom::<16>(), &urandom::<12>()));
+    let parsed = hex.len() == 64
+        && (0..32).all(|i| {
+            u8::from_str_radix(&hex[2 * i..2 * i + 2], 16)
+                .map(|b| key[i] = b)
+                .is_ok()
+        });
+    let out = parsed
+        .then(|| engine_core::key::encrypt_v1(&key, pass, &urandom::<16>(), &urandom::<12>()));
     wipe(&mut key);
     // SAFETY: on n'écrit que des zéros, l'UTF-8 reste valide
     wipe(unsafe { input.as_bytes_mut() });
     match out {
         Some(Ok(p)) => println!("{addr}:{p}"),
-        _ => { eprintln!("clé attendue : 64 hex, avec ou sans 0x"); std::process::exit(2); }
+        _ => {
+            eprintln!("clé attendue : 64 hex, avec ou sans 0x");
+            std::process::exit(2);
+        }
     }
 }
 
@@ -96,67 +131,158 @@ fn encrypt(addr: &str) {
 
 async fn get_json(url: &str) -> Result<Value, String> {
     let (s, b) = http::get_any(url, T).await.map_err(|e| format!("{e:?}"))?;
-    if s != 200 { return Err(format!("HTTP {s}")); }
+    if s != 200 {
+        return Err(format!("HTTP {s}"));
+    }
     serde_json::from_slice(&b).map_err(|e| format!("json: {e}"))
 }
 
 /// Un appel JSON-RPC (POST) au nœud Polygon.
 async fn rpc(url: &str, method: &str, params: Value) -> Result<Value, String> {
-    let rest = url.strip_prefix("https://").ok_or("rpc_http doit être https://")?;
-    let (host, path) = rest.split_once('/').map_or((rest, "/".to_string()), |(h, p)| (h, format!("/{p}")));
+    let rest = url
+        .strip_prefix("https://")
+        .ok_or("rpc_http doit être https://")?;
+    let (host, path) = rest
+        .split_once('/')
+        .map_or((rest, "/".to_string()), |(h, p)| (h, format!("/{p}")));
     let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }).to_string();
     let req = format!("POST {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: copy-trading\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len());
-    let r = tokio::time::timeout(T, async { let mut c = Conn::new(dial(host, 443, true).await?); c.write(req.as_bytes()).await?; c.read().await }).await
-        .map_err(|_| "rpc: délai".to_string())?.map_err(|e| format!("rpc: {e:?}"))?;
+    let r = tokio::time::timeout(T, async {
+        let mut c = Conn::new(dial(host, 443, true).await?);
+        c.write(req.as_bytes()).await?;
+        c.read().await
+    })
+    .await
+    .map_err(|_| "rpc: délai".to_string())?
+    .map_err(|e| format!("rpc: {e:?}"))?;
     let v: Value = serde_json::from_slice(&r.body).map_err(|e| format!("rpc json: {e}"))?;
-    v.get("result").cloned().ok_or_else(|| format!("rpc: {}", v["error"]))
+    v.get("result")
+        .cloned()
+        .ok_or_else(|| format!("rpc: {}", v["error"]))
 }
 
 /// Valeur totale du wallet suivi : positions au prix du marché (data-api /value) + cash pUSD (balanceOf).
 async fn his_value(cfg: &Config) -> Result<f64, String> {
-    let pos = get_json(&format!("{DATA}/value?user={}", cfg.wallet)).await?[0]["value"].as_f64().ok_or("value: format")?;
+    let pos = get_json(&format!("{DATA}/value?user={}", cfg.wallet)).await?[0]["value"]
+        .as_f64()
+        .ok_or("value: format")?;
     let call = json!([{ "to": PUSD, "data": format!("0x70a08231{:0>64}", cfg.wallet.trim_start_matches("0x")) }, "latest"]);
     let cash = rpc(&cfg.rpc_http, "eth_call", call).await?;
-    let cash = u128::from_str_radix(cash.as_str().ok_or("balanceOf: format")?.trim_start_matches("0x"), 16).map_err(|e| format!("balanceOf: {e}"))? as f64 / 1e6;
+    let cash = u128::from_str_radix(
+        cash.as_str()
+            .ok_or("balanceOf: format")?
+            .trim_start_matches("0x"),
+        16,
+    )
+    .map_err(|e| format!("balanceOf: {e}"))? as f64
+        / 1e6;
     Ok(pos + cash)
 }
 
 // ---- ordres réels -----------------------------------------------------------------------------------------------------
 
 /// La requête `POST /order` signée d'un ordre FAK : achat de `size` $ ou vente de `size` parts, au prix limite `limit`.
-fn order_request(s: &Signer, c: &exec::Creds, token: &str, buy: bool, size: f64, limit: f64, tick: f64, salt: u64, now_ms: u64) -> Result<Vec<u8>, String> {
+fn order_request(
+    s: &Signer,
+    c: &exec::Creds,
+    token: &str,
+    buy: bool,
+    size: f64,
+    limit: f64,
+    tick: f64,
+    salt: u64,
+    now_ms: u64,
+) -> Result<Vec<u8>, String> {
     let micro = |x: f64| (x * 1e6).round() as i64;
     let size = ((size * 100.0 + 1e-9).floor() as i64) * 10_000; // au cent (ou centième de part) inférieur
     let side = if buy { Side::Buy } else { Side::Sell };
-    let (maker_amount, taker_amount) = sign::amounts(side, size, micro(limit), micro(tick)).map_err(|e| format!("montants : {e:?}"))?;
-    let o = sign::Order { salt, token_id: token.into(), maker_amount, taker_amount, side, timestamp_ms: now_ms };
-    exec::order_request(HOST, s, c, &s.body(&o, &c.key), now_ms / 1000).map_err(|e| format!("signature : {e:?}"))
+    let (maker_amount, taker_amount) = sign::amounts(side, size, micro(limit), micro(tick))
+        .map_err(|e| format!("montants : {e:?}"))?;
+    let o = sign::Order {
+        salt,
+        token_id: token.into(),
+        maker_amount,
+        taker_amount,
+        side,
+        timestamp_ms: now_ms,
+    };
+    exec::order_request(HOST, s, c, &s.body(&o, &c.key), now_ms / 1000)
+        .map_err(|e| format!("signature : {e:?}"))
 }
 
-struct Live { armed: Armed, clob: Clob }
+struct Live {
+    armed: Armed,
+    clob: Clob,
+}
 
 /// Ce que devient un ordre réel : (parts, $) remplis, et les instants d'envoi, d'accusé et de fill (ms).
-struct Sent { shares: f64, usd: f64, sent: Option<u64>, ack: Option<u64>, fill: Option<u64>, phase: Phase, raw: String }
+struct Sent {
+    shares: f64,
+    usd: f64,
+    sent: Option<u64>,
+    ack: Option<u64>,
+    fill: Option<u64>,
+    phase: Phase,
+    raw: String,
+}
 
-async fn send(l: &mut Live, clock: &Clock, token: &str, buy: bool, size: f64, limit: f64, tick: f64) -> Result<Sent, String> {
+async fn send(
+    l: &mut Live,
+    clock: &Clock,
+    token: &str,
+    buy: bool,
+    size: f64,
+    limit: f64,
+    tick: f64,
+) -> Result<Sent, String> {
     let now_ms = clock.now().wall_ns / 1_000_000;
     let salt = u64::from_le_bytes(urandom::<8>()) >> 11; // ≤ 2^53, comme les sels du SDK
-    let req = order_request(&l.armed.signer, &l.armed.creds, token, buy, size, limit, tick, salt, now_ms)?;
+    let req = order_request(
+        &l.armed.signer,
+        &l.armed.creds,
+        token,
+        buy,
+        size,
+        limit,
+        tick,
+        salt,
+        now_ms,
+    )?;
     let mut o = Order::default();
     o.apply(Input::Signed).map_err(|e| format!("{e:?}"))?;
     let s = l.clob.post(&req, &mut o, clock).await;
     let ms = |x: Option<engine_core::clock::Stamp>| x.map(|s| s.wall_ns / 1_000_000);
-    let raw = s.raw.as_ref().map(|r| String::from_utf8_lossy(&r.body).into_owned()).unwrap_or_default();
+    let raw = s
+        .raw
+        .as_ref()
+        .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+        .unwrap_or_default();
     // un FAK est rempli au moment où le CLOB l'apparie : l'accusé « matched » date le fill
     let (mut shares, mut usd) = (0.0, 0.0);
     if o.phase == Phase::Matched {
         let v: Value = serde_json::from_str(&raw).unwrap_or_default();
-        let f = |k: &str| v[k].as_str().and_then(|x| x.parse::<f64>().ok()).unwrap_or(0.0);
+        let f = |k: &str| {
+            v[k].as_str()
+                .and_then(|x| x.parse::<f64>().ok())
+                .unwrap_or(0.0)
+        };
         // `[non vérifié sur ordre réel de copy-trading]` : achat, making = $ donnés, taking = parts reçues ; vente, l'inverse
-        (shares, usd) = if buy { (f("takingAmount"), f("makingAmount")) } else { (f("makingAmount"), f("takingAmount")) };
+        (shares, usd) = if buy {
+            (f("takingAmount"), f("makingAmount"))
+        } else {
+            (f("makingAmount"), f("takingAmount"))
+        };
     }
     let matched = o.phase == Phase::Matched;
-    Ok(Sent { shares, usd, sent: ms(s.written), ack: ms(s.answered), fill: if matched { ms(s.answered) } else { None }, phase: o.phase, raw })
+    Ok(Sent {
+        shares,
+        usd,
+        sent: ms(s.written),
+        ack: ms(s.answered),
+        fill: if matched { ms(s.answered) } else { None },
+        phase: o.phase,
+        raw,
+    })
 }
 
 // ---- le bot -----------------------------------------------------------------------------------------------------------
@@ -187,10 +313,15 @@ struct Bot {
     live: Option<Live>,
 }
 
-fn now_ms(c: &Clock) -> u64 { c.now().wall_ns / 1_000_000 }
+fn now_ms(c: &Clock) -> u64 {
+    c.now().wall_ns / 1_000_000
+}
 
 impl Bot {
-    fn done(&mut self, mut line: Value, lat: Value) { line["lat"] = lat; self.log(line) }
+    fn done(&mut self, mut line: Value, lat: Value) {
+        line["lat"] = lat;
+        self.log(line)
+    }
 
     fn log(&mut self, mut v: Value) {
         v["at"] = json!(now_ms(&self.clock));
@@ -199,31 +330,57 @@ impl Bot {
     }
 
     async fn book(&self, token: &str) -> Result<book::Book, String> {
-        let (s, b) = http::get_any(&format!("{CLOB}/book?token_id={token}"), T).await.map_err(|e| format!("{e:?}"))?;
-        if s != 200 { return Err(format!("HTTP {s}")); }
+        let (s, b) = http::get_any(&format!("{CLOB}/book?token_id={token}"), T)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        if s != 200 {
+            return Err(format!("HTTP {s}"));
+        }
         book::parse(&b)
     }
 
     async fn on_fill(&mut self, f: chain::Fill, src: &str, obs_ms: u64) {
         // un token encore jamais vu : son premier match est déjà passé (non mesuré), les suivants seront datés
-        if self.subscribed.insert(f.token.clone()) { let _ = self.market_cmd.send(Cmd::Subscribe(vec![f.token.clone()])); }
+        if self.subscribed.insert(f.token.clone()) {
+            let _ = self.market_cmd.send(Cmd::Subscribe(vec![f.token.clone()]));
+        }
         let src_ms = self.matched.get(&f.tx).copied();
         let his_before = self.his_pos.get(&f.token).copied().unwrap_or(0.0);
-        *self.his_pos.entry(f.token.clone()).or_default() += if f.buy { f.shares } else { -f.shares };
-        let his_price = if f.shares > 0.0 { f.usd / f.shares } else { 0.0 };
+        *self.his_pos.entry(f.token.clone()).or_default() +=
+            if f.buy { f.shares } else { -f.shares };
+        let his_price = if f.shares > 0.0 {
+            f.usd / f.shares
+        } else {
+            0.0
+        };
         let mut line = json!({ "t": "trade", "src": src, "tx": f.tx, "token": f.token, "side": if f.buy { "BUY" } else { "SELL" },
             "his_usd": f.usd, "his_shares": f.shares, "his_price": his_price, "his_value": self.his_value });
         let bk = self.book(&f.token).await;
         let dec_ms = now_ms(&self.clock);
         let mut lat = json!({ "src": src_ms, "obs": obs_ms, "dec": dec_ms, "sent": null, "ack": null, "fill": null });
-        let bk = match bk { Ok(b) => b, Err(e) => { line["decision"] = json!("skip"); line["reason"] = json!(format!("carnet illisible : {e}")); return self.done(line, lat); } };
+        let bk = match bk {
+            Ok(b) => b,
+            Err(e) => {
+                line["decision"] = json!("skip");
+                line["reason"] = json!(format!("carnet illisible : {e}"));
+                return self.done(line, lat);
+            }
+        };
         line["book_ts"] = json!(bk.ts_ms);
         self.market_of.insert(f.token.clone(), bk.market.clone());
-        if let (Some(b), Some(a)) = (bk.bids.first(), bk.asks.first()) { self.marks.insert(f.token.clone(), (b.0 + a.0) / 2.0); }
-        let skip = |line: &mut Value, why: &str| { line["decision"] = json!("skip"); line["reason"] = json!(why); };
+        if let (Some(b), Some(a)) = (bk.bids.first(), bk.asks.first()) {
+            self.marks.insert(f.token.clone(), (b.0 + a.0) / 2.0);
+        }
+        let skip = |line: &mut Value, why: &str| {
+            line["decision"] = json!("skip");
+            line["reason"] = json!(why);
+        };
         if self.live.is_some() && bk.neg_risk {
             // shortcut: sign.rs ne signe que pour l'échange standard ; le domaine neg-risk demande d'étendre Signer (accord requis)
-            skip(&mut line, "neg-risk : signature non prise en charge en live");
+            skip(
+                &mut line,
+                "neg-risk : signature non prise en charge en live",
+            );
         } else if f.buy && self.his_value <= 0.0 {
             skip(&mut line, "valeur du wallet suivi inconnue");
         } else if f.buy && self.entered.contains(&f.token) {
@@ -238,8 +395,19 @@ impl Bot {
                 None => skip(&mut line, "aucun ask"),
                 Some(_) if m <= 0.0 => skip(&mut line, "sous le premier palier"),
                 Some(&(ask, _)) => {
-                    let usd = sizing::buy_usd(f.usd, self.his_value, self.real.value(&self.marks).0, self.real.cash, &self.cfg.tiers, bk.min_size * ask, self.cfg.max_order_usd);
-                    if usd <= 0.0 { skip(&mut line, "cash insuffisant pour le minimum"); return self.done(line, lat); }
+                    let usd = sizing::buy_usd(
+                        f.usd,
+                        self.his_value,
+                        self.real.value(&self.marks).0,
+                        self.real.cash,
+                        &self.cfg.tiers,
+                        bk.min_size * ask,
+                        self.cfg.max_order_usd,
+                    );
+                    if usd <= 0.0 {
+                        skip(&mut line, "cash insuffisant pour le minimum");
+                        return self.done(line, lat);
+                    }
                     line["my_usd"] = json!(usd);
                     self.entered.insert(f.token.clone());
                     let limit = book::buy_limit(ask, self.cfg.max_slippage, bk.tick);
@@ -248,26 +416,46 @@ impl Bot {
                     line["limit"] = json!(limit);
                     self.obs.buy(&f.token, usd / his_price, usd);
                     self.dem.buy(&f.token, usd / ask, usd);
-                    let (sh, cost) = self.fill(&f.token, true, usd, limit, bk.tick, &bk, &mut lat, &mut line).await;
+                    let (sh, cost) = self
+                        .fill(
+                            &f.token, true, usd, limit, bk.tick, &bk, &mut lat, &mut line,
+                        )
+                        .await;
                     self.real.buy(&f.token, sh, cost);
                 }
             }
         } else {
             let mine = sizing::sell_shares(f.shares, his_before, self.real.shares(&f.token));
-            line["x"] = json!(if his_before > 0.0 { (f.shares / his_before).min(1.0) } else { 0.0 });
+            line["x"] = json!(if his_before > 0.0 {
+                (f.shares / his_before).min(1.0)
+            } else {
+                0.0
+            });
             line["my_shares"] = json!(mine);
-            let (o, d) = (sizing::sell_shares(f.shares, his_before, self.obs.shares(&f.token)), sizing::sell_shares(f.shares, his_before, self.dem.shares(&f.token)));
-            if mine + o + d <= 0.0 { skip(&mut line, "aucune position à vendre"); } else {
+            let (o, d) = (
+                sizing::sell_shares(f.shares, his_before, self.obs.shares(&f.token)),
+                sizing::sell_shares(f.shares, his_before, self.dem.shares(&f.token)),
+            );
+            if mine + o + d <= 0.0 {
+                skip(&mut line, "aucune position à vendre");
+            } else {
                 line["decision"] = json!("sell");
                 self.obs.sell(&f.token, o, o * his_price);
-                if let Some(&(bid, _)) = bk.bids.first() { self.dem.sell(&f.token, d, d * bid); line["asked"] = json!(bid); }
+                if let Some(&(bid, _)) = bk.bids.first() {
+                    self.dem.sell(&f.token, d, d * bid);
+                    line["asked"] = json!(bid);
+                }
                 match bk.bids.first() {
                     None => line["reason"] = json!("aucun bid"),
                     Some(_) if mine < bk.min_size => line["reason"] = json!("réel sous le minimum"),
                     Some(&(bid, _)) => {
                         let limit = book::sell_limit(bid, self.cfg.max_slippage, bk.tick);
                         line["limit"] = json!(limit);
-                        let (sh, got) = self.fill(&f.token, false, mine, limit, bk.tick, &bk, &mut lat, &mut line).await;
+                        let (sh, got) = self
+                            .fill(
+                                &f.token, false, mine, limit, bk.tick, &bk, &mut lat, &mut line,
+                            )
+                            .await;
                         self.real.sell(&f.token, sh, got);
                     }
                 }
@@ -278,46 +466,103 @@ impl Bot {
 
     /// Exécution réelle (live) ou remplissage sur le carnet réel observé (paper) : (parts, $).
     #[allow(clippy::too_many_arguments)]
-    async fn fill(&mut self, token: &str, buy: bool, size: f64, limit: f64, tick: f64, bk: &book::Book, lat: &mut Value, line: &mut Value) -> (f64, f64) {
+    async fn fill(
+        &mut self,
+        token: &str,
+        buy: bool,
+        size: f64,
+        limit: f64,
+        tick: f64,
+        bk: &book::Book,
+        lat: &mut Value,
+        line: &mut Value,
+    ) -> (f64, f64) {
         let (sh, usd) = match self.live.as_mut() {
-            None => if buy { book::walk_buy(&bk.asks, limit, size) } else { book::walk_sell(&bk.bids, limit, size) },
+            None => {
+                if buy {
+                    book::walk_buy(&bk.asks, limit, size)
+                } else {
+                    book::walk_sell(&bk.bids, limit, size)
+                }
+            }
             Some(l) => match send(l, &self.clock, token, buy, size, limit, tick).await {
                 Ok(s) => {
-                    (lat["sent"], lat["ack"], lat["fill"]) = (json!(s.sent), json!(s.ack), json!(s.fill));
+                    (lat["sent"], lat["ack"], lat["fill"]) =
+                        (json!(s.sent), json!(s.ack), json!(s.fill));
                     line["order"] = json!({ "phase": format!("{:?}", s.phase), "answer": s.raw.chars().take(300).collect::<String>() });
                     (s.shares, s.usd)
                 }
-                Err(e) => { line["order"] = json!({ "error": e }); (0.0, 0.0) }
+                Err(e) => {
+                    line["order"] = json!({ "error": e });
+                    (0.0, 0.0)
+                }
             },
         };
         line["fill_shares"] = json!(sh);
         line["fill_usd"] = json!(usd);
-        if sh <= 0.0 { line["reason"] = json!("pas de liquidité dans la borne"); }
+        if sh <= 0.0 {
+            line["reason"] = json!("pas de liquidité dans la borne");
+        }
         (sh, usd)
     }
 
     /// Secours et contrôle : data-api /activity. Un fill absent de la chaîne 10 s après son bloc est traité comme manqué.
     async fn poll_activity(&mut self) {
-        let Ok(v) = get_json(&format!("{DATA}/activity?user={}&limit=100&type=TRADE", self.cfg.wallet)).await else { return };
+        let Ok(v) = get_json(&format!(
+            "{DATA}/activity?user={}&limit=100&type=TRADE",
+            self.cfg.wallet
+        ))
+        .await
+        else {
+            return;
+        };
         let Some(rows) = v.as_array() else { return };
         let now = now_ms(&self.clock);
         let mut by: BTreeMap<String, (String, bool, f64, f64, u64)> = BTreeMap::new();
         for r in rows {
-            let (Some(tx), Some(ts), Some(tok), Some(side), Some(size), Some(usd)) = (r["transactionHash"].as_str(), r["timestamp"].as_u64(), r["asset"].as_str(), r["side"].as_str(), r["size"].as_f64(), r["usdcSize"].as_f64()) else { continue };
-            if ts * 1000 < self.start_ms { continue; }
-            let e = by.entry(tx.to_lowercase()).or_insert((tok.into(), side == "BUY", 0.0, 0.0, ts));
-            e.2 += size; e.3 += usd;
+            let (Some(tx), Some(ts), Some(tok), Some(side), Some(size), Some(usd)) = (
+                r["transactionHash"].as_str(),
+                r["timestamp"].as_u64(),
+                r["asset"].as_str(),
+                r["side"].as_str(),
+                r["size"].as_f64(),
+                r["usdcSize"].as_f64(),
+            ) else {
+                continue;
+            };
+            if ts * 1000 < self.start_ms {
+                continue;
+            }
+            let e =
+                by.entry(tx.to_lowercase())
+                    .or_insert((tok.into(), side == "BUY", 0.0, 0.0, ts));
+            e.2 += size;
+            e.3 += usd;
         }
         for (tx, (tok, buy, size, usd, ts)) in by {
             match self.by_tx.get(&tx).cloned() {
-                Some((t, b, s)) => if self.checked.insert(tx.clone()) {
-                    let ok = t == tok && b == buy && (s - size).abs() < 0.01;
-                    self.log(json!({ "t": "check", "tx": tx, "ok": ok, "chain": [t, b, s], "data_api": [tok, buy, size] }));
-                },
+                Some((t, b, s)) => {
+                    if self.checked.insert(tx.clone()) {
+                        let ok = t == tok && b == buy && (s - size).abs() < 0.01;
+                        self.log(json!({ "t": "check", "tx": tx, "ok": ok, "chain": [t, b, s], "data_api": [tok, buy, size] }));
+                    }
+                }
                 None if ts * 1000 + 10_000 < now => {
                     self.by_tx.insert(tx.clone(), (tok.clone(), buy, size));
                     self.checked.insert(tx.clone());
-                    self.on_fill(chain::Fill { tx, log_index: u64::MAX, token: tok, buy, usd, shares: size }, "data-api", now).await;
+                    self.on_fill(
+                        chain::Fill {
+                            tx,
+                            log_index: u64::MAX,
+                            token: tok,
+                            buy,
+                            usd,
+                            shares: size,
+                        },
+                        "data-api",
+                        now,
+                    )
+                    .await;
                 }
                 None => {}
             }
@@ -326,37 +571,79 @@ impl Bot {
 
     /// Chaque minute : sa valeur, le prix des positions tenues, les marchés résolus, puis une ligne `state`.
     async fn minute(&mut self) {
-        match his_value(&self.cfg).await { Ok(v) => self.his_value = v, Err(e) => self.log(json!({ "t": "warn", "what": format!("valeur du wallet suivi : {e}") })) }
-        let held: HashSet<String> = [&self.obs, &self.dem, &self.real].iter().flat_map(|a| a.pos.keys().cloned()).collect();
+        match his_value(&self.cfg).await {
+            Ok(v) => self.his_value = v,
+            Err(e) => {
+                self.log(json!({ "t": "warn", "what": format!("valeur du wallet suivi : {e}") }))
+            }
+        }
+        let held: HashSet<String> = [&self.obs, &self.dem, &self.real]
+            .iter()
+            .flat_map(|a| a.pos.keys().cloned())
+            .collect();
         let mut done = HashSet::new();
         for tok in held {
-            if let Ok(b) = self.book(&tok).await { if let (Some(x), Some(y)) = (b.bids.first(), b.asks.first()) { self.marks.insert(tok.clone(), (x.0 + y.0) / 2.0); } }
-            let Some(m) = self.market_of.get(&tok).cloned() else { continue };
-            if !done.insert(m.clone()) { continue; }
-            let Ok(v) = get_json(&format!("{CLOB}/markets/{m}")).await else { continue };
-            if v["closed"] != true { continue; }
-            let Some(tokens) = v["tokens"].as_array() else { continue };
-            if !tokens.iter().any(|t| t["winner"] == true) { continue; }
+            if let Ok(b) = self.book(&tok).await {
+                if let (Some(x), Some(y)) = (b.bids.first(), b.asks.first()) {
+                    self.marks.insert(tok.clone(), (x.0 + y.0) / 2.0);
+                }
+            }
+            let Some(m) = self.market_of.get(&tok).cloned() else {
+                continue;
+            };
+            if !done.insert(m.clone()) {
+                continue;
+            }
+            let Ok(v) = get_json(&format!("{CLOB}/markets/{m}")).await else {
+                continue;
+            };
+            if v["closed"] != true {
+                continue;
+            }
+            let Some(tokens) = v["tokens"].as_array() else {
+                continue;
+            };
+            if !tokens.iter().any(|t| t["winner"] == true) {
+                continue;
+            }
             for t in tokens {
-                let (Some(id), win) = (t["token_id"].as_str(), t["winner"] == true) else { continue };
+                let (Some(id), win) = (t["token_id"].as_str(), t["winner"] == true) else {
+                    continue;
+                };
                 let payout = if win { 1.0 } else { 0.0 };
-                for a in [&mut self.obs, &mut self.dem, &mut self.real] { a.resolve(id, payout); }
+                for a in [&mut self.obs, &mut self.dem, &mut self.real] {
+                    a.resolve(id, payout);
+                }
                 self.marks.remove(id);
                 self.log(json!({ "t": "resolution", "market": m, "token": id, "payout": payout }));
             }
         }
-        let st = |a: &Account, marks: &BTreeMap<String, f64>| { let (v, u) = a.value(marks); json!({ "value": v, "pnl": v - a.start, "unmarked": u, "cash": a.cash, "positions": a.pos.len() }) };
+        let st = |a: &Account, marks: &BTreeMap<String, f64>| {
+            let (v, u) = a.value(marks);
+            json!({ "value": v, "pnl": v - a.start, "unmarked": u, "cash": a.cash, "positions": a.pos.len() })
+        };
         let line = json!({ "t": "state", "his_value": self.his_value, "obs": st(&self.obs, &self.marks), "dem": st(&self.dem, &self.marks), "real": st(&self.real, &self.marks) });
         self.log(line);
     }
 }
 
 fn run(path: &str) {
-    let cfg: Config = serde_json::from_str(&std::fs::read_to_string(path).expect("config illisible")).expect("config invalide");
-    let ok = cfg.wallet.len() == 42 && cfg.wallet.starts_with("0x") && cfg.wallet[2..].bytes().all(|b| b.is_ascii_hexdigit());
+    let cfg: Config =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("config illisible"))
+            .expect("config invalide");
+    let ok = cfg.wallet.len() == 42
+        && cfg.wallet.starts_with("0x")
+        && cfg.wallet[2..].bytes().all(|b| b.is_ascii_hexdigit());
     assert!(ok, "config : wallet attendu 0x + 40 hex");
-    assert!(cfg.mode == "paper" || cfg.mode == "live", "config : mode paper ou live");
-    let mut journal = std::fs::OpenOptions::new().create(true).append(true).open(&cfg.journal).expect("journal");
+    assert!(
+        cfg.mode == "paper" || cfg.mode == "live",
+        "config : mode paper ou live"
+    );
+    let mut journal = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&cfg.journal)
+        .expect("journal");
     let clock = Arc::new(Clock::new());
     let lock = format!("{}.live-lock", cfg.journal);
     let live = (cfg.mode == "live").then(|| {
@@ -372,8 +659,13 @@ fn run(path: &str) {
         (clob.deadline, clob.grace) = (Duration::from_secs(4), Duration::from_secs(10));
         Live { armed, clob }
     });
-    if live.is_some() { println!("ARMED"); }
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    if live.is_some() {
+        println!("ARMED");
+    }
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     rt.block_on(async move {
         let start_ms = now_ms(&clock);
         let real_cash = match &live {
@@ -441,21 +733,65 @@ mod tests {
     /// Le chemin d'ordre live jusqu'à la signature : la requête signée d'un achat FAK, montants du SDK, en-têtes L2.
     #[test]
     fn live_order_is_signed_up_to_the_request() {
-        let s = Signer::from_bytes(&[0x11; 32], "0x7a57144fafde87f5ce4a880d570bae58eebc83f2").unwrap();
-        let c = exec::Creds { key: "k".into(), secret: "c2VjcmV0".into(), passphrase: "p".into() };
+        let s =
+            Signer::from_bytes(&[0x11; 32], "0x7a57144fafde87f5ce4a880d570bae58eebc83f2").unwrap();
+        let c = exec::Creds {
+            key: "k".into(),
+            secret: "c2VjcmV0".into(),
+            passphrase: "p".into(),
+        };
         let token = "18048113644252055228047575277787633022068076468097449060148334743204784347285";
-        let req = String::from_utf8(order_request(&s, &c, token, true, 2.349, 0.55, 0.01, 42, 1_793_240_248_866).unwrap()).unwrap();
+        let req = String::from_utf8(
+            order_request(
+                &s,
+                &c,
+                token,
+                true,
+                2.349,
+                0.55,
+                0.01,
+                42,
+                1_793_240_248_866,
+            )
+            .unwrap(),
+        )
+        .unwrap();
         let (head, body) = req.split_once("\r\n\r\n").unwrap();
-        assert!(head.starts_with("POST /order HTTP/1.1\r\nHost: clob.polymarket.com\r\n") && head.contains("POLY_SIGNATURE: ") && head.contains("POLY_TIMESTAMP: 1793240248\r\n"));
+        assert!(
+            head.starts_with("POST /order HTTP/1.1\r\nHost: clob.polymarket.com\r\n")
+                && head.contains("POLY_SIGNATURE: ")
+                && head.contains("POLY_TIMESTAMP: 1793240248\r\n")
+        );
         let v: Value = serde_json::from_str(body).unwrap();
         // 2,34 $ (au cent inférieur) à 0,55 au plus → 4,2546 parts (arrondi du SDK : 4 décimales vers le haut)
-        assert_eq!((v["orderType"].as_str(), v["order"]["side"].as_str(), v["order"]["makerAmount"].as_str(), v["order"]["takerAmount"].as_str()), (Some("FAK"), Some("BUY"), Some("2340000"), Some("4254600")));
-        assert_eq!((v["order"]["tokenId"].as_str(), v["owner"].as_str()), (Some(token), Some("k")));
+        assert_eq!(
+            (
+                v["orderType"].as_str(),
+                v["order"]["side"].as_str(),
+                v["order"]["makerAmount"].as_str(),
+                v["order"]["takerAmount"].as_str()
+            ),
+            (Some("FAK"), Some("BUY"), Some("2340000"), Some("4254600"))
+        );
+        assert_eq!(
+            (v["order"]["tokenId"].as_str(), v["owner"].as_str()),
+            (Some(token), Some("k"))
+        );
         let sig = v["order"]["signature"].as_str().unwrap();
-        assert!(sig.starts_with("0x") && sig.len() > 2 + 2 * (65 + 64), "signature ERC-7739 complète");
-        assert!(order_request(&s, &c, token, false, 10.0, 0.555, 0.01, 1, 0).is_err(), "prix hors grille refusé");
+        assert!(
+            sig.starts_with("0x") && sig.len() > 2 + 2 * (65 + 64),
+            "signature ERC-7739 complète"
+        );
+        assert!(
+            order_request(&s, &c, token, false, 10.0, 0.555, 0.01, 1, 0).is_err(),
+            "prix hors grille refusé"
+        );
     }
 
     #[test]
-    fn wipe_zeroes() { let mut b = [7u8; 4]; wipe(&mut b); assert_eq!(b, [0; 4]); }
+    fn wipe_zeroes() {
+        let mut b = [7u8; 4];
+        wipe(&mut b);
+        assert_eq!(b, [0; 4]);
+    }
 }

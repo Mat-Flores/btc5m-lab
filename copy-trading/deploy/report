@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# report : synthese tres courte (<= 15 lignes) du journal du serveur, en paper comme en live : 3 comptes de PnL
+# report : synthese structuree et coloree (<= 15 lignes) du journal, en paper comme en live
 # (observe, demande, reel) et latences mediane / p90 par segment. Lecture seule.
 # Usage : report
 set -uo pipefail
@@ -9,5 +9,12 @@ load_env
 check_conn
 installed || die "copy-trading n'est pas installe sur ce serveur"
 rsh "test -s $R_JOURNAL" || die "journal vide ou absent ($R_JOURNAL) : lancer d'abord deploy/start"
-rsh "$APP/bin/copy-trading report $R_JOURNAL" || die "lecture du journal impossible"
-printf '%s\n' "$DIM$(state_line)$RST"
+COLOR=0
+[ -t 1 ] && [ -z "${NO_COLOR:-}" ] && COLOR=1
+SERVICE=$(svc_state)
+LIVE_PID=$(live_pid)
+LOCK=0
+lock_present && LOCK=1
+if [ "$SERVICE" != active ] && [ -n "$LIVE_PID" ]; then SERVICE=active; fi
+case "$SERVICE" in active|failed) ;; *) SERVICE=inactive ;; esac
+rsh "COPY_REPORT_COLOR=$COLOR COPY_REPORT_SERVICE=$SERVICE COPY_REPORT_LIVE_PID=$LIVE_PID COPY_REPORT_LIVE_LOCK=$LOCK $APP/bin/copy-trading report $R_JOURNAL" || die "lecture du journal impossible"

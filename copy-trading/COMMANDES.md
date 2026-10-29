@@ -32,7 +32,7 @@ Il suit UN wallet public Polymarket et recopie ses trades :
   - *réel* : mes fills en live, ou le remplissage calculé sur le vrai carnet en paper.
 
   La résolution des marchés est comptée dans les trois.
-- **Latences** par trade : match CLOB de son ordre → observation → décision → envoi → accusé du CLOB → fill. Un segment non mesuré s'affiche « non mesuré », jamais estimé.
+- **Latences** par trade : match CLOB de son ordre → observation → décision → envoi → accusé du CLOB → fill. Un segment non mesuré s'affiche `NULL` avec `N = 0`, jamais estimé.
   - Le match est daté par le websocket market de Polymarket. Le premier trade sur un token encore jamais suivi n'est pas daté.
   - En paper, les segments envoi, accusé et fill n'existent pas.
 
@@ -99,15 +99,16 @@ Arrête le service paper (et le désactive) ou envoie SIGTERM au run live. Véri
 bash copy-trading/deploy/report
 ```
 
-Synthèse de 15 lignes au plus, en paper comme en live, lue sur le journal du serveur (`/var/lib/copy-trading/journal.jsonl`) :
+Tableau de bord du journal serveur (`/var/lib/copy-trading/journal.jsonl`) : cadre à largeur fixe, lignes TRADES/SOURCE/ordres, tableaux COMPTES et LATENCE avec tendances PnL et barres de distribution, puis état du service. Les caractères de contrôle issus du journal sont neutralisés et les valeurs trop longues tronquées pour préserver l'alignement. Les couleurs sont désactivées si la sortie n'est pas un terminal ou si `NO_COLOR` est défini.
 
-- trades vus (chaîne / secours), copiés, ignorés, avec leurs raisons ;
-- contrôles data-api ;
-- les 3 PnL (valeur et nombre de positions non valorisées) ;
-- médiane et p90 de chaque segment de latence ;
-- un arrêt de sécurité éventuel.
+- volume copié/ignoré/indéterminé, motifs principaux, source et contrôles data-api ;
+- ordres envoyés, acquittés et remplis ; annulations/rejets à `NULL` si le journal ne les qualifie pas ;
+- PnL, rendement relatif au capital initial, positions non valorisées et tendance des trois comptes ;
+- glissements entre les comptes, latences médiane/P90 et distribution par segment ;
+- état du service, run paper/live, verrou live, dernier trade et arrêt de sécurité éventuel.
 
-Le journal s'allonge d'un run à l'autre : la synthèse couvre tout le journal.
+Un compteur mesuré à zéro s'affiche `0` ; une donnée absente ou pas encore mesurée s'affiche `NULL`, jamais comme un faux zéro.
+Le journal s'allonge d'un run à l'autre : les statistiques couvrent tout le journal. L'état du service et le verrou live sont lus en direct sur le serveur.
 
 ## Fichiers sur le serveur
 

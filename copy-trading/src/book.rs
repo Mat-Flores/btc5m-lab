@@ -16,38 +16,71 @@ pub struct Book {
     pub ts_ms: u64,
 }
 
-fn num(v: &Value) -> Option<f64> { v.as_str().and_then(|s| s.parse().ok()).or_else(|| v.as_f64()) }
+fn num(v: &Value) -> Option<f64> {
+    v.as_str()
+        .and_then(|s| s.parse().ok())
+        .or_else(|| v.as_f64())
+}
 
 pub fn parse(body: &[u8]) -> Result<Book, String> {
     let v: Value = serde_json::from_slice(body).map_err(|e| format!("book json: {e}"))?;
     let side = |k: &str| -> Result<Vec<(f64, f64)>, String> {
-        v[k].as_array().ok_or(format!("book: pas de {k}"))?.iter().map(|l| Ok((num(&l["price"]).ok_or("prix")?, num(&l["size"]).ok_or("taille")?))).collect::<Result<_, &str>>().map_err(String::from)
+        v[k].as_array()
+            .ok_or(format!("book: pas de {k}"))?
+            .iter()
+            .map(|l| {
+                Ok((
+                    num(&l["price"]).ok_or("prix")?,
+                    num(&l["size"]).ok_or("taille")?,
+                ))
+            })
+            .collect::<Result<_, &str>>()
+            .map_err(String::from)
     };
     // le CLOB range les niveaux du pire au meilleur ; on ne s'y fie pas, on trie
     let (mut bids, mut asks) = (side("bids")?, side("asks")?);
     bids.sort_by(|a, b| b.0.total_cmp(&a.0));
     asks.sort_by(|a, b| a.0.total_cmp(&b.0));
     Ok(Book {
-        market: v["market"].as_str().ok_or("book: pas de market")?.to_string(), bids, asks,
-        tick: num(&v["tick_size"]).ok_or("book: pas de tick_size")?, min_size: num(&v["min_order_size"]).ok_or("book: pas de min_order_size")?,
-        neg_risk: v["neg_risk"].as_bool().unwrap_or(false), ts_ms: v["timestamp"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0),
+        market: v["market"]
+            .as_str()
+            .ok_or("book: pas de market")?
+            .to_string(),
+        bids,
+        asks,
+        tick: num(&v["tick_size"]).ok_or("book: pas de tick_size")?,
+        min_size: num(&v["min_order_size"]).ok_or("book: pas de min_order_size")?,
+        neg_risk: v["neg_risk"].as_bool().unwrap_or(false),
+        ts_ms: v["timestamp"]
+            .as_str()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0),
     })
 }
 
-fn ticks(x: f64, tick: f64) -> f64 { x / tick + 1e-9 }
+fn ticks(x: f64, tick: f64) -> f64 {
+    x / tick + 1e-9
+}
 
 /// Prix limite d'achat : meilleur ask + `slip`, ramené sur la grille vers le bas (jamais au-delà de la borne), < 1.
-pub fn buy_limit(ask: f64, slip: f64, tick: f64) -> f64 { (ticks((ask * (1.0 + slip)).min(1.0 - tick), tick).floor() * tick * 1e6).round() / 1e6 }
+pub fn buy_limit(ask: f64, slip: f64, tick: f64) -> f64 {
+    (ticks((ask * (1.0 + slip)).min(1.0 - tick), tick).floor() * tick * 1e6).round() / 1e6
+}
 /// Prix limite de vente : meilleur bid − `slip`, ramené sur la grille vers le haut, ≥ un tick.
-pub fn sell_limit(bid: f64, slip: f64, tick: f64) -> f64 { ((ticks((bid * (1.0 - slip)).max(tick), tick) - 2e-9).ceil() * tick * 1e6).round() / 1e6 }
+pub fn sell_limit(bid: f64, slip: f64, tick: f64) -> f64 {
+    ((ticks((bid * (1.0 - slip)).max(tick), tick) - 2e-9).ceil() * tick * 1e6).round() / 1e6
+}
 
 /// Achat de `usd` en remontant les asks jusqu'à `limit` : (parts, coût). Rien dans la borne → (0, 0).
 pub fn walk_buy(asks: &[(f64, f64)], limit: f64, usd: f64) -> (f64, f64) {
     let (mut shares, mut cost) = (0.0, 0.0);
     for &(p, s) in asks.iter().take_while(|l| l.0 <= limit + 1e-9) {
         let take = s.min((usd - cost) / p);
-        if take <= 0.0 { break; }
-        shares += take; cost += take * p;
+        if take <= 0.0 {
+            break;
+        }
+        shares += take;
+        cost += take * p;
     }
     (shares, cost)
 }
@@ -57,8 +90,11 @@ pub fn walk_sell(bids: &[(f64, f64)], limit: f64, shares: f64) -> (f64, f64) {
     let (mut sold, mut got) = (0.0, 0.0);
     for &(p, s) in bids.iter().take_while(|l| l.0 >= limit - 1e-9) {
         let take = s.min(shares - sold);
-        if take <= 0.0 { break; }
-        sold += take; got += take * p;
+        if take <= 0.0 {
+            break;
+        }
+        sold += take;
+        got += take * p;
     }
     (sold, got)
 }
@@ -74,7 +110,10 @@ mod tests {
     fn real_book_reads_best_first() {
         let b = parse(REAL.as_bytes()).unwrap();
         assert_eq!((b.bids[0], b.asks[0]), ((0.48, 100.0), (0.50, 40.0)));
-        assert_eq!((b.tick, b.min_size, b.neg_risk, b.ts_ms, b.market.as_str()), (0.01, 5.0, false, 1793240248866, "0x2789"));
+        assert_eq!(
+            (b.tick, b.min_size, b.neg_risk, b.ts_ms, b.market.as_str()),
+            (0.01, 5.0, false, 1793240248866, "0x2789")
+        );
         assert!(parse(b"{}").is_err());
     }
 

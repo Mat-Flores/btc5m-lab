@@ -4,28 +4,64 @@
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Account { pub start: f64, pub cash: f64, pub pos: BTreeMap<String, f64> }
+pub struct Account {
+    pub start: f64,
+    pub cash: f64,
+    pub pos: BTreeMap<String, f64>,
+}
 
 impl Account {
-    pub fn new(cash: f64) -> Self { Account { start: cash, cash, pos: BTreeMap::new() } }
-    pub fn shares(&self, token: &str) -> f64 { self.pos.get(token).copied().unwrap_or(0.0) }
+    pub fn new(cash: f64) -> Self {
+        Account {
+            start: cash,
+            cash,
+            pos: BTreeMap::new(),
+        }
+    }
+    pub fn shares(&self, token: &str) -> f64 {
+        self.pos.get(token).copied().unwrap_or(0.0)
+    }
     pub fn buy(&mut self, token: &str, shares: f64, cost: f64) {
-        if shares <= 0.0 { return; }
+        if shares <= 0.0 {
+            return;
+        }
         self.cash -= cost;
         *self.pos.entry(token.into()).or_default() += shares;
     }
     pub fn sell(&mut self, token: &str, shares: f64, proceeds: f64) {
-        if shares <= 0.0 || self.shares(token) <= 0.0 { return; }
+        if shares <= 0.0 || self.shares(token) <= 0.0 {
+            return;
+        }
         self.cash += proceeds;
         let left = self.shares(token) - shares;
-        if left > 1e-9 { self.pos.insert(token.into(), left); } else { self.pos.remove(token); }
+        if left > 1e-9 {
+            self.pos.insert(token.into(), left);
+        } else {
+            self.pos.remove(token);
+        }
     }
     /// Marché résolu : `payout` par part (1 gagnant, 0 perdant).
-    pub fn resolve(&mut self, token: &str, payout: f64) { if let Some(s) = self.pos.remove(token) { self.cash += s * payout; } }
+    pub fn resolve(&mut self, token: &str, payout: f64) {
+        if let Some(s) = self.pos.remove(token) {
+            self.cash += s * payout;
+        }
+    }
     /// Valeur aux prix `marks` ; les positions sans prix observé ne sont pas valorisées et sont comptées à part.
     pub fn value(&self, marks: &BTreeMap<String, f64>) -> (f64, usize) {
         let mut unmarked = 0;
-        let v = self.pos.iter().map(|(t, s)| marks.get(t).map_or_else(|| { unmarked += 1; 0.0 }, |p| s * p)).sum::<f64>();
+        let v = self
+            .pos
+            .iter()
+            .map(|(t, s)| {
+                marks.get(t).map_or_else(
+                    || {
+                        unmarked += 1;
+                        0.0
+                    },
+                    |p| s * p,
+                )
+            })
+            .sum::<f64>();
         (self.cash + v, unmarked)
     }
 }
