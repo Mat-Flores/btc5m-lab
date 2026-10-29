@@ -184,7 +184,7 @@ Voir [`architecture-backtest.md`](architecture-backtest.md) §6.4 pour la liste 
 
 - Ordres **remplis en partie puis annulés** : volume prédit ×1,438 (57 564 parts en trop sur 96 560 réelles). C'est l'essentiel de la surprédiction.
 - Ordres **remplis en entier** : ×0,974 (sous-prédits).
-- Ordres **sans file devant eux** (`qa0` = 0) : ×1,076. Ce n'est pas un effet des annulations (aucune file à amincir) : cause non identifiée, `[à mesurer]` (provenance des fills : au niveau ou par traversée).
+- Ordres **sans file devant eux** (`qa0` = 0) : ×1,076. Ce n'est pas un effet des annulations (aucune file à amincir) : voir §10.3.
 
 ### 10.2 Correction 1 : part des annulations devant nous (`venue.cancel_ahead_factor`, 2026-10-28)
 
@@ -204,6 +204,12 @@ Sur les 59 695 jumeaux avec le facteur 0,5 : volume 1,002, ordres exacts 83,5 %,
 - **Coût** : −0,6 point d'ordres exacts. La correction règle le biais global mais pas l'erreur ordre par ordre : elle retarde aussi les ordres remplis en entier, déjà sous-prédits.
 - **Surajustement** : risque faible (un seul paramètre, choisi sur l'ajustement, confirmé en contrôle sur le volume). Le PnL d'ajustement (3 716 $ réels) est trop petit pour départager les facteurs.
 - **Valeur retenue** : le défaut reste 1, pour que la non-régression reste vraie (vérifié : 0 écart avec l'oracle). Valeur recommandée pour les backtests : **0,5**, à passer en surcharge (`{"venue": {"cancel_ahead_factor": 0.5}}`).
+
+### 10.3 Ordres sans file devant eux : erreur de mesure, pas de correction (2026-10-28)
+
+Mesure (ajustement, rejeu des jumeaux instrumenté puis retiré) : sur les ordres à `qa0` = 0, 80 % du volume prédit vient de trades à notre prix, 14 % de trades à travers, 8 % d'asks qui croisent. 20 % du volume prédit tombe **avant** le premier fill réel (avance médiane 760 ms, p90 6,9 s) : un ordre seul à son prix serait pourtant touché par ce trade. La part de ces fills précoces dépend de la taille de l'ordre : 49 % du volume « à notre prix » pour les ordres de 5 parts, 33 % de 6 à 20, 15 % de 21 à 100, 3 % au-delà.
+
+Conclusion : la pose est mal retrouvée. `validate` prend comme arrivée le premier ajout de **exactement la taille de l'ordre** au niveau, dès 1 s avant sa création ; pour une taille courante, c'est souvent l'ordre de quelqu'un d'autre (déjà signalé : `WALLETS.md:82`). C'est une erreur de mesure, à traiter dans l'appariement de `validate` (par exemple l'ajout le plus proche de l'heure de création), **pas** une option de l'exchange simulé (méthode E1, point 3). Non fait : l'appariement de `validate` est la référence de non-régression.
 
 ## 11. Points à vérifier
 
