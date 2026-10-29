@@ -36,7 +36,8 @@ pub struct Config {
     /// Nombre de fenêtres suivant la courante (gamma enregistré, tokens CLOB abonnés).
     #[serde(default = "windows_ahead")]
     pub windows_ahead: u64,
-    /// La fenêtre précédente reste sondée (résolution, price to beat) ce nombre de secondes après sa fin.
+    /// Une fenêtre finie reste sondée (résolution, price to beat) ce nombre de secondes après sa fin. La résolution
+    /// arrive ≈ 5 min après la fin (314 s mesurées) : 120 s la manquait.
     #[serde(default = "prev_grace_s")]
     pub gamma_prev_grace_s: u64,
     /// Garde disque (D3) : arrêt d'écriture sous ce seuil, reprise au-dessus de l'autre.
@@ -52,7 +53,7 @@ fn btc5m() -> MarketSpec { MarketSpec { venue: "polymarket".into(), asset: "btc"
 fn gamma_poll_ms() -> u64 { 10_000 }
 fn clob_time_poll_ms() -> u64 { 2_000 }
 fn windows_ahead() -> u64 { 2 }
-fn prev_grace_s() -> u64 { 120 }
+fn prev_grace_s() -> u64 { 900 }
 fn disk_min() -> f64 { 2.0 }
 fn disk_resume() -> f64 { 3.0 }
 

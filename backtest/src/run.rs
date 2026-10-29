@@ -5,7 +5,10 @@
 //!   is its slug (the old recordings have no condition id); its rebate rate 0.2 (WALLETS.md:42, not recorded then).
 //! - Current traces: each frame redecoded by the source's own adapter (`raw`); gamma's answers by `windows::parse`.
 //! - `signal`: a source of its own, the mean of the last values of `signal.sources` (their mid, or their trade price
-//!   with `field: "trade"`), emitted when one of them changes and all are known.
+//!   with `field: "trade"`), emitted when one of them changes and all are known. A `.old` trace has one price per
+//!   source (`px`), used for both fields.
+//! - Gamma is polled: a window is given to the engine once (a window announced before the period, at its start),
+//!   its result once.
 //! - Venue (`TraceVenue`): a FAK order meets the book `one_way_ms` + a hold drawn from `taker_hold` after its decision;
 //!   a post-only bid is refused if it would cross, else joins its level `one_way_ms` after the decision with the
 //!   level's size at the decision ahead of it (sim.mjs:396), and fills by `fill_bound` on the changes of its level
@@ -36,7 +39,7 @@ fn m(x: f64) -> Micro { (x * MICRO).round() as Micro }
 
 /// What one trace line becomes.
 #[derive(Debug)]
-pub enum Item { Feed(Payload, Option<u64>), Window(Window), Resolved { slug: String, up_won: bool }, PriceToBeat { slug: String, value: Micro } }
+pub enum Item { Feed(Payload, Option<u64>, bool), Window(Window), Resolved { slug: String, up_won: bool }, PriceToBeat { slug: String, value: Micro } }
 
 fn levels(v: &Value) -> Vec<Level> { v.as_array().map_or(vec![], |a| a.iter().filter_map(|l| Some(Level { price: m(l[0].as_f64()?), size: m(l[1].as_f64()?) })).collect()) }
 fn ms(v: &Value) -> Option<u64> { v.as_f64().filter(|x| *x > 0.0).map(|x| x as u64) }
@@ -44,16 +47,16 @@ fn ms(v: &Value) -> Option<u64> { v.as_f64().filter(|x| *x > 0.0).map(|x| x as u
 /// A `.old` line (`kind`, `legacy` = the old session line) as engine input. None: not market data (clock, gap…).
 pub fn map_old(kind: &str, l: &Value) -> Option<Item> {
     Some(match kind {
-        "mid" => { let p = m(l["p"].as_f64()?); Item::Feed(Payload::Quote { bid: p, ask: p }, ms(&l["et"])) }
-        "oracle" => Item::Feed(Payload::Oracle { value: m(l["p"].as_f64()?) }, ms(&l["ts"])),
-        "snapshot" => Item::Feed(Payload::BookSnapshot { asset: l["a"].as_str()?.into(), bids: levels(&l["bids"]), asks: levels(&l["asks"]), tick: None }, ms(&l["ts"])),
+        "mid" => { let p = m(l["p"].as_f64()?); Item::Feed(Payload::Quote { bid: p, ask: p }, ms(&l["et"]), true) }
+        "oracle" => Item::Feed(Payload::Oracle { value: m(l["p"].as_f64()?) }, ms(&l["ts"]), true),
+        "snapshot" => Item::Feed(Payload::BookSnapshot { asset: l["a"].as_str()?.into(), bids: levels(&l["bids"]), asks: levels(&l["asks"]), tick: None }, ms(&l["ts"]), true),
         "delta" => {
             let changes = l["ch"].as_array()?.iter().filter_map(|c| Some(Change { asset: c[0].as_str()?.into(), side: if c[1] == "A" { Side::Ask } else { Side::Bid },
                 price: m(c[2].as_f64()?), size: m(c[3].as_f64()?), best_bid: None, best_ask: None })).collect();
-            Item::Feed(Payload::BookDelta { changes }, ms(&l["ts"]))
+            Item::Feed(Payload::BookDelta { changes }, ms(&l["ts"]), true)
         }
         "trade" => Item::Feed(Payload::Trade { asset: l["a"].as_str()?.into(), price: m(l["p"].as_f64()?), size: m(l["s"].as_f64()?),
-            side: if l["side"] == "BUY" { Side::Bid } else { Side::Ask }, id: l["id"].as_str().unwrap_or("").into() }, ms(&l["ts"])),
+            side: if l["side"] == "BUY" { Side::Bid } else { Side::Ask }, id: l["id"].as_str().unwrap_or("").into() }, ms(&l["ts"]), true),
         "window" => {
             let w = &l["w"];
             let start = w["start"].as_u64()?;
@@ -144,7 +147,7 @@ fn read_next(s: &mut Src, spec: &MarketSpec, out: &mut Vec<(i64, Item)>) -> Resu
         let mut evs = vec![];
         if a.decode(raw, recv, s.id, &mut evs).is_err() { continue; }
         if evs.is_empty() { continue; }
-        for e in evs { out.push((t, Item::Feed(e.payload, e.event_ms))); }
+        for e in evs { out.push((t, Item::Feed(e.payload, e.event_ms, false))); }
         return Ok(true);
     }
 }
@@ -357,6 +360,8 @@ fn run_one(c: &Config, root: &Path, from_day: &str, to_day: &str, from_us: i64, 
     let mut cmds: Vec<Command> = vec![];
     let mut vev = vec![];
     let mut slugs: HashMap<String, Window> = HashMap::new();
+    let mut early: Vec<Window> = vec![];
+    let mut resolved: std::collections::HashSet<String> = Default::default();
     let mut ptb: HashMap<String, Micro> = HashMap::new();
     let mut money: HashMap<String, Money> = HashMap::new();
     let mut res = Res { id: id.into(), variant: variant.into(), windows: 0, orders: 0, refused: 0, why: vec![], fills: 0, volume: 0.0, fees: 0.0, rebates: 0.0, pnl: 0.0, settled: 0 };
@@ -392,8 +397,16 @@ fn run_one(c: &Config, root: &Path, from_day: &str, to_day: &str, from_us: i64, 
     while let Some(std::cmp::Reverse((t, src, k))) = heap.pop() {
         let (_, item) = pending.remove(&k).unwrap();
         refill(&mut srcs[src as usize], &mut heap, &mut pending, &mut seq)?;
-        if t < from_us { if let Item::Window(w) = &item { slugs.insert(w.slug.clone(), w.clone()); } continue; }
+        if t < from_us { if let Item::Window(w) = item { early.retain(|x| x.slug != w.slug); early.push(w); } continue; }
         if t >= to_us { break; }
+        // windows announced before the period and still to trade, at its start
+        for w in std::mem::take(&mut early) {
+            if (w.end as i64) * 1_000_000 <= t || slugs.contains_key(&w.slug) { continue; }
+            slugs.insert(w.slug.clone(), w.clone());
+            res.windows += 1;
+            venue.window(&w);
+            step(&mut eng, &mut venue, Some(EngineInput::Window(w)), stamp(t), &mut cmds, &mut vev, &mut money, &mut res, &slugs);
+        }
         // whole ticks first, then the venue up to now
         if next_tick == i64::MIN { next_tick = t - t.rem_euclid(tick_us) + tick_us; }
         while next_tick <= t {
@@ -402,11 +415,16 @@ fn run_one(c: &Config, root: &Path, from_day: &str, to_day: &str, from_us: i64, 
         }
         let at = stamp(t);
         match item {
-            Item::Feed(payload, event_ms) => {
+            Item::Feed(payload, event_ms, legacy) => {
                 let e = Event { source: src, recv: at, event_ms, seq: None, payload };
                 // the signal: the mean of its sources' last values
                 if let Some(i) = sig_of[src as usize] {
-                    let v = match (&e.payload, c.signal.field.as_str()) { (Payload::Quote { bid, ask }, _) => Some((bid + ask) / 2), (Payload::Trade { price, .. }, "trade") => Some(*price), _ => None };
+                    let v = match (&e.payload, c.signal.field.as_str()) {
+                        (Payload::Quote { bid, ask }, "mid") => Some((bid + ask) / 2),
+                        (Payload::Quote { bid, ask }, _) if legacy => Some((bid + ask) / 2),
+                        (Payload::Trade { price, .. }, "trade") => Some(*price),
+                        _ => None,
+                    };
                     if let Some(v) = v { sig_val[i] = Some(v); }
                 }
                 // the venue first: fills of this change reach the strategy before the change itself (sim.mjs:446-448)
@@ -424,13 +442,16 @@ fn run_one(c: &Config, root: &Path, from_day: &str, to_day: &str, from_us: i64, 
                 }
             }
             Item::Window(w) => {
-                if slugs.insert(w.slug.clone(), w.clone()).is_none() { res.windows += 1; }
+                if slugs.contains_key(&w.slug) { continue; }
+                slugs.insert(w.slug.clone(), w.clone());
+                res.windows += 1;
                 venue.window(&w);
                 step(&mut eng, &mut venue, Some(EngineInput::Window(w)), at, &mut cmds, &mut vev, &mut money, &mut res, &slugs);
             }
             Item::PriceToBeat { slug, value } => { ptb.insert(slug, value); }
             Item::Resolved { slug, up_won } => {
                 let Some(w) = slugs.get(&slug).cloned() else { continue };
+                if !resolved.insert(slug.clone()) { continue; }
                 if let Some(b) = money.get(&slug) {
                     let pnl = b.cash + b.shares[if up_won { 0 } else { 1 }];
                     res.pnl += pnl as f64 / MICRO;
@@ -451,7 +472,11 @@ fn run_one(c: &Config, root: &Path, from_day: &str, to_day: &str, from_us: i64, 
         }
     }
     res.refused = eng.refused.len() as u64;
-    for (_, _, why) in &eng.refused { match res.why.iter_mut().find(|x| x.0 == *why) { Some(x) => x.1 += 1, None => res.why.push((why.clone(), 1)) } }
+    // grouped by kind: numbers replaced by #
+    for (_, _, why) in &eng.refused {
+        let k: String = why.split(|c: char| c.is_ascii_digit()).filter(|x| !x.is_empty()).collect::<Vec<_>>().join("#");
+        match res.why.iter_mut().find(|x| x.0 == k) { Some(x) => x.1 += 1, None => res.why.push((k, 1)) }
+    }
     Ok(res)
 }
 
@@ -462,9 +487,9 @@ mod tests {
 
     #[test]
     fn old_lines_map_to_engine_inputs() {
-        let Some(Item::Feed(Payload::Quote { bid, ask }, Some(831))) = map_old("mid", &json!({ "k": "px", "t": 1.0, "src": "okx", "p": 82983.35, "et": 831 })) else { panic!() };
+        let Some(Item::Feed(Payload::Quote { bid, ask }, Some(831), true)) = map_old("mid", &json!({ "k": "px", "t": 1.0, "src": "okx", "p": 82983.35, "et": 831 })) else { panic!() };
         assert_eq!((bid, ask), (82_983_350_000, 82_983_350_000));
-        let Some(Item::Feed(Payload::BookDelta { changes }, Some(1000))) = map_old("delta", &json!({ "ch": [["a", "B", 0.01, 9650.01], ["b", "A", 0.99, 1.5]], "ts": 1000 })) else { panic!() };
+        let Some(Item::Feed(Payload::BookDelta { changes }, Some(1000), true)) = map_old("delta", &json!({ "ch": [["a", "B", 0.01, 9650.01], ["b", "A", 0.99, 1.5]], "ts": 1000 })) else { panic!() };
         assert_eq!((changes[0].side, changes[0].price, changes[0].size, changes[1].side), (Side::Bid, 10_000, 9_650_010_000, Side::Ask));
         let Some(Item::Window(w)) = map_old("window", &json!({ "w": { "slug": "btc-updown-5m-300", "start": 300, "len": 300, "tokens": ["u", "d"], "tick": 0.01, "minSize": 5,
             "fee": { "rate": 0.07, "exponent": 1 }, "twap": 60, "priceToBeat": null } })) else { panic!() };

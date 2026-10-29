@@ -12,8 +12,8 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 /// Les tokens d'une fenêtre terminée restent abonnés ce temps après sa fin (comme engine/app : AFTER_END_S).
 const TOKENS_AFTER_END_S: u64 = 15;
 
-/// Débuts des fenêtres à enregistrer : la précédente (tant qu'elle est dans `prev_grace_s` après sa fin), la courante,
-/// puis `ahead` suivantes.
+/// Débuts des fenêtres à enregistrer : les fenêtres finies depuis moins de `prev_grace_s` (leur résolution arrive
+/// ≈ 5 min après la fin), la courante, puis `ahead` suivantes.
 pub fn gamma_starts(spec: &MarketSpec, now_s: u64, ahead: u64, prev_grace_s: u64) -> Vec<u64> {
     window_list(spec, now_s, ahead, prev_grace_s)
 }
@@ -26,7 +26,9 @@ pub fn token_starts(spec: &MarketSpec, now_s: u64, ahead: u64) -> Vec<u64> {
 fn window_list(spec: &MarketSpec, now_s: u64, ahead: u64, prev_grace_s: u64) -> Vec<u64> {
     let cur = spec.window_start(now_s);
     let mut v = vec![];
-    if cur >= spec.horizon_s && now_s - cur < prev_grace_s { v.push(cur - spec.horizon_s); }
+    let mut end = cur;
+    while end >= spec.horizon_s && now_s - end < prev_grace_s { v.push(end - spec.horizon_s); end -= spec.horizon_s; }
+    v.reverse();
     v.extend((0..=ahead).map(|i| cur + i * spec.horizon_s));
     v
 }
@@ -103,6 +105,8 @@ mod tests {
         assert_eq!(gamma_starts(&s, 1_792_359_450, 2, 120), vec![1_792_359_300, 1_792_359_600, 1_792_359_900]);
         // 30 s après le début de la fenêtre : la précédente est encore suivie (résolution)
         assert_eq!(gamma_starts(&s, 1_792_359_330, 1, 120), vec![1_792_359_000, 1_792_359_300, 1_792_359_600]);
+        // 15 min de grâce : les 3 fenêtres finies depuis moins de 900 s restent sondées (résultat officiel)
+        assert_eq!(gamma_starts(&s, 1_792_359_330, 0, 900), vec![1_792_358_400, 1_792_358_700, 1_792_359_000, 1_792_359_300]);
         // les tokens de la précédente ne restent que 15 s après sa fin
         assert_eq!(token_starts(&s, 1_792_359_330, 1), vec![1_792_359_300, 1_792_359_600]);
         assert_eq!(token_starts(&s, 1_792_359_305, 1), vec![1_792_359_000, 1_792_359_300, 1_792_359_600]);

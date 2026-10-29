@@ -5,7 +5,7 @@
   "gamma_poll_ms": 10000,
   "clob_time_poll_ms": 2000,
   "windows_ahead": 2,
-  "gamma_prev_grace_s": 120,
+  "gamma_prev_grace_s": 900,
   "disk_min_free_gb": 2.0,
   "disk_resume_free_gb": 3.0,
   "sources": [
