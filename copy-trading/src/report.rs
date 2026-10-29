@@ -15,9 +15,11 @@ const BAR_W: usize = 20;
 const TRADE_BAR_W: usize = 28;
 const LATENCY_W: [usize; 4] = [27, 8, 8, 5];
 const ACCOUNT_W: [usize; 6] = [14, 9, 8, 9, 9, 12];
+const COPY_W: [usize; 9] = [8, 4, 5, 5, 6, 7, 7, 8, 8];
 const SEP: &str = " │ ";
 const MAX_REASONS: usize = 3;
 const MAX_REASON_CHARS: usize = 24;
+const MAX_COPY_ROWS: usize = 6;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tint {
@@ -336,6 +338,16 @@ fn clock_text(ms: u64) -> String {
     )
 }
 
+fn clock_hms(ms: u64) -> String {
+    let seconds = ms / 1_000;
+    format!(
+        "{:02}:{:02}:{:02}",
+        (seconds / 3_600) % 24,
+        (seconds / 60) % 60,
+        seconds % 60
+    )
+}
+
 fn age_text(ms: u64) -> String {
     let seconds = ms / 1_000;
     if seconds < 60 {
@@ -484,6 +496,213 @@ fn latency_row(label: &str, sorted: &[f64], bold: bool) -> Vec<Segment> {
         row.push(text("▒".repeat(p90_cells - median_cells), Tint::Orange));
     }
     row
+}
+
+fn copy_margin(price: Option<f64>) -> Option<f64> {
+    price
+        .filter(|price| *price > 0.0 && *price <= 1.0)
+        .and_then(|price| rounded((1.0 / price - 1.0) * 100.0, 1))
+}
+
+fn format_copy_margin(margin: f64) -> String {
+    let magnitude = margin.abs();
+    if magnitude >= 1_000_000.0 {
+        format!("{margin:+.1e}%")
+    } else if magnitude >= 1_000.0 {
+        format!("{:+.1}k%", margin / 1_000.0)
+    } else if magnitude >= 100.0 {
+        format!("{margin:+.1}%")
+    } else {
+        format!("{margin:+.1} %")
+    }
+}
+
+fn copy_fill(trade: &Value) -> Option<(f64, f64, f64)> {
+    let shares = finite(&trade["fill_shares"])?;
+    let usd = finite(&trade["fill_usd"])?;
+    if shares <= 0.0 || usd < 0.0 {
+        return None;
+    }
+    let price = rounded(usd / shares, 3)?;
+    let usd = rounded(usd, 2)?;
+    Some((shares, usd, price))
+}
+
+fn copy_row(trade: &Value) -> Vec<Segment> {
+    let is_buy = trade["decision"] == "buy";
+    let side = if is_buy { "BUY" } else { "SELL" };
+    let side_tint = if is_buy { Tint::Cyan } else { Tint::Magenta };
+    let at = trade["at"].as_u64().map(clock_hms);
+    let his_price = finite(&trade["his_price"]).and_then(|price| rounded(price, 3));
+    let fill = copy_fill(trade);
+    let my_price = fill.map(|(_, _, price)| price);
+    let difference = match (his_price, my_price) {
+        (Some(his), Some(mine)) => rounded(mine - his, 3),
+        _ => None,
+    };
+    let difference_tint = match (difference, is_buy) {
+        (Some(value), true) if value > 0.0 => Tint::Red,
+        (Some(value), true) if value < 0.0 => Tint::Green,
+        (Some(value), false) if value > 0.0 => Tint::Green,
+        (Some(value), false) if value < 0.0 => Tint::Red,
+        (Some(_), _) => Tint::Plain,
+        (None, _) => Tint::Dim,
+    };
+    let his_usd = finite(&trade["his_usd"]).and_then(|usd| rounded(usd, 2));
+    let my_usd = fill.map(|(_, usd, _)| usd);
+    let his_margin = if is_buy { copy_margin(his_price) } else { None };
+    let my_margin = if is_buy { copy_margin(my_price) } else { None };
+    let price_cell = |price: Option<f64>, tint| {
+        number(
+            &price.map_or_else(|| "NULL".into(), |price| format!("{price:.3}")),
+            5,
+            tint,
+        )
+    };
+    let amount_cell = |amount: Option<f64>| {
+        number(
+            &amount.map_or_else(|| "NULL".into(), |amount| format!("{amount:.2}")),
+            7,
+            amount.map_or(Tint::Dim, |_| Tint::Plain),
+        )
+    };
+    let margin_cell = |margin: Option<f64>| {
+        number(
+            &margin.map_or_else(|| "NULL".into(), format_copy_margin),
+            COPY_W[7],
+            margin.map_or(Tint::Dim, |margin| sign_tint(Some(margin))),
+        )
+    };
+    join_cells(vec![
+        left(at.as_deref().unwrap_or("NULL"), COPY_W[0], Tint::Gray),
+        left(side, COPY_W[1], side_tint).bold(),
+        price_cell(his_price, Tint::Plain),
+        price_cell(
+            my_price,
+            if my_price.is_some() {
+                Tint::Plain
+            } else {
+                Tint::Dim
+            },
+        ),
+        number(
+            &difference.map_or_else(|| "NULL".into(), |value| format!("{value:+.3}")),
+            COPY_W[4],
+            difference_tint,
+        ),
+        amount_cell(his_usd),
+        amount_cell(my_usd),
+        margin_cell(his_margin),
+        margin_cell(my_margin),
+    ])
+}
+
+fn copy_summary(trades: &[&Value]) -> [Vec<Segment>; 2] {
+    let copies: Vec<&Value> = trades
+        .iter()
+        .copied()
+        .filter(|trade| trade["decision"] == "buy" || trade["decision"] == "sell")
+        .collect();
+    let filled: Vec<(&Value, (f64, f64, f64))> = copies
+        .iter()
+        .filter_map(|trade| copy_fill(trade).map(|fill| (*trade, fill)))
+        .collect();
+    let price_differences: Vec<f64> = filled
+        .iter()
+        .filter_map(|(trade, (_, _, my_price))| {
+            finite(&trade["his_price"]).map(|his_price| my_price - his_price)
+        })
+        .filter(|difference| difference.is_finite())
+        .collect();
+    let buy_fills: Vec<_> = filled
+        .iter()
+        .filter(|(trade, _)| trade["decision"] == "buy")
+        .collect();
+    let stakes: Vec<(f64, f64)> = buy_fills
+        .iter()
+        .filter_map(|(trade, (_, my_usd, _))| {
+            finite(&trade["his_usd"])
+                .filter(|his_usd| *his_usd > 0.0)
+                .map(|his_usd| (his_usd, *my_usd))
+        })
+        .collect();
+    let his_stake: f64 = stakes.iter().map(|(his_usd, _)| his_usd).sum();
+    let my_stake: f64 = stakes.iter().map(|(_, my_usd)| my_usd).sum();
+    let his_margins: Vec<f64> = buy_fills
+        .iter()
+        .filter_map(|(trade, _)| copy_margin(finite(&trade["his_price"])))
+        .collect();
+    let my_margins: Vec<f64> = buy_fills
+        .iter()
+        .filter_map(|(_, (_, _, price))| copy_margin(Some(*price)))
+        .collect();
+    let average = |values: &[f64], decimals: usize| {
+        if values.is_empty() {
+            None
+        } else {
+            rounded(
+                values.iter().sum::<f64>() / values.len() as f64,
+                decimals as i32,
+            )
+        }
+    };
+    let display =
+        |value: Option<f64>, format: fn(f64) -> String| value.map_or_else(|| "NULL".into(), format);
+    let average_difference = average(&price_differences, 3);
+    let stake_ratio = if his_stake > 0.0 {
+        rounded(my_stake / his_stake * 100.0, 1)
+    } else {
+        None
+    };
+    let his_margin = average(&his_margins, 1);
+    let my_margin = average(&my_margins, 1);
+    let summary = vec![
+        text("moyenne  écart ", Tint::Gray),
+        text(
+            display(average_difference, |value| format!("{value:+.3}")),
+            sign_tint(average_difference),
+        )
+        .bold(),
+        text("  ·  mise ", Tint::Dim),
+        text(
+            display(stake_ratio, |value| format!("{value:.1} %")),
+            Tint::Plain,
+        )
+        .bold(),
+        text(" de la sienne  ·  marge ", Tint::Dim),
+        text(
+            display(his_margin, |value| format!("{value:.1} %")),
+            Tint::Gray,
+        )
+        .bold(),
+        text(" → ", Tint::Dim),
+        text(
+            display(my_margin, |value| format!("{value:.1} %")),
+            sign_tint(match (his_margin, my_margin) {
+                (Some(his), Some(mine)) => Some(mine - his),
+                _ => None,
+            }),
+        )
+        .bold(),
+    ];
+    let unfilled = copies.len().saturating_sub(filled.len());
+    let older = copies.len().saturating_sub(MAX_COPY_ROWS);
+    let mut counts = vec![
+        count_segment(copies.len(), Tint::Plain),
+        text(" copiés · ", Tint::Gray),
+        count_segment(filled.len(), Tint::Green),
+        text(" remplis · ", Tint::Gray),
+        count_segment(unfilled, Tint::Magenta),
+        text(" NULL · écart = mon prix − son prix", Tint::Dim),
+    ];
+    if older > 0 {
+        counts.extend([
+            text(" · +", Tint::Dim),
+            count_segment(older, Tint::Yellow),
+            text(" anciens", Tint::Dim),
+        ]);
+    }
+    [summary, counts]
 }
 
 fn account_row(
@@ -869,6 +1088,44 @@ fn render(journal: &str, color: bool, now_ms: Option<u64>) -> String {
         true,
     ));
 
+    canvas.section("COPIES · LUI vs MOI");
+    canvas.row(join_cells(vec![
+        left("", COPY_W[0], Tint::Plain),
+        left("", COPY_W[1], Tint::Plain),
+        left(
+            "PRIX (0-1)",
+            COPY_W[2] + COPY_W[3] + COPY_W[4] + 6,
+            Tint::Gray,
+        )
+        .bold(),
+        left("MISE (USD)", COPY_W[5] + COPY_W[6] + 3, Tint::Gray).bold(),
+        left("MARGE", COPY_W[7] + COPY_W[8] + 3, Tint::Gray).bold(),
+    ]));
+    canvas.row(join_cells(vec![
+        left("Heure", COPY_W[0], Tint::Cyan).bold(),
+        left("Sens", COPY_W[1], Tint::Cyan).bold(),
+        right("Lui", COPY_W[2], Tint::Cyan).bold(),
+        right("Moi", COPY_W[3], Tint::Cyan).bold(),
+        right("Écart", COPY_W[4], Tint::Cyan).bold(),
+        right("Lui", COPY_W[5], Tint::Cyan).bold(),
+        right("Moi", COPY_W[6], Tint::Cyan).bold(),
+        right("Lui", COPY_W[7], Tint::Cyan).bold(),
+        right("Moi", COPY_W[8], Tint::Cyan).bold(),
+    ]));
+    let copies: Vec<&Value> = trades
+        .iter()
+        .copied()
+        .filter(|trade| trade["decision"] == "buy" || trade["decision"] == "sell")
+        .collect();
+    let mut recent: Vec<&Value> = copies.iter().rev().take(MAX_COPY_ROWS).copied().collect();
+    recent.reverse();
+    for trade in recent {
+        canvas.row(copy_row(trade));
+    }
+    let [copy_metrics, copy_counts] = copy_summary(&trades);
+    canvas.row(copy_metrics);
+    canvas.row(copy_counts);
+
     canvas.section("ÉTAT");
     let service = match std::env::var("COPY_REPORT_SERVICE").ok().as_deref() {
         Some("active") => text("● active", Tint::Green),
@@ -998,7 +1255,7 @@ mod tests {
     #[test]
     fn full_report_has_fixed_width_and_expected_metrics() {
         let output = render(&sample_journal(), false, None);
-        assert_eq!(output.lines().count(), 25, "{output}");
+        assert_eq!(output.lines().count(), 31, "{output}");
         assert_aligned(&output);
         for expected in [
             "COPY-TRADING · RAPPORT",
@@ -1030,7 +1287,7 @@ mod tests {
     #[test]
     fn empty_report_is_null_safe_and_aligned() {
         let output = render("", false, None);
-        assert_eq!(output.lines().count(), 25, "{output}");
+        assert_eq!(output.lines().count(), 30, "{output}");
         assert_aligned(&output);
         for expected in [
             "● NULL",
@@ -1089,10 +1346,55 @@ mod tests {
             r#"{"t":"halt","at":130000,"reason":"limite atteinte"}"#
         );
         let output = render(&journal, false, None);
-        assert_eq!(output.lines().count(), 26, "{output}");
+        assert_eq!(output.lines().count(), 32, "{output}");
         assert_aligned(&output);
         assert!(output.contains("ARRÊT"), "{output}");
         assert!(output.contains("● arrêté"), "{output}");
+    }
+
+    #[test]
+    fn copies_section_compares_actual_fills_and_keeps_unfilled_values_null() {
+        let journal = [
+            r#"{"t":"trade","at":50502000,"decision":"buy","side":"BUY","his_price":0.52,"his_usd":1250.0,"fill_shares":47.16981132,"fill_usd":25.0}"#,
+            r#"{"t":"trade","at":52000000,"decision":"buy","side":"BUY","his_price":0.48,"his_usd":900.0,"fill_shares":0.0,"fill_usd":0.0}"#,
+            r#"{"t":"trade","at":53000000,"decision":"skip","his_price":0.6,"his_usd":50.0}"#,
+        ]
+        .join("\n");
+        let output = render(&journal, false, None);
+        assert_aligned(&output);
+        for expected in [
+            "COPIES · LUI vs MOI",
+            "Heure    │ Sens │   Lui │   Moi │  Écart │     Lui │     Moi │      Lui │      Moi",
+            "14:01:42 │ BUY  │ 0.520 │ 0.530 │ +0.010 │ 1250.00 │   25.00 │  +92.3 % │  +88.7 %",
+            "14:26:40 │ BUY  │ 0.480 │  NULL │   NULL │  900.00 │    NULL │  +108.3% │     NULL",
+            "moyenne  écart +0.010  ·  mise 2.0 % de la sienne  ·  marge 92.3 % → 88.7 %",
+            "2 copiés · 1 remplis · 1 NULL",
+        ] {
+            assert!(
+                output.contains(expected),
+                "manque {expected:?} dans\n{output}"
+            );
+        }
+    }
+
+    #[test]
+    fn copies_section_limits_rows_to_the_six_most_recent_copies() {
+        let journal = (0..8)
+            .map(|index| {
+                format!(
+                    r#"{{"t":"trade","at":{},"decision":"buy","his_price":0.5,"his_usd":10.0,"fill_shares":2.0,"fill_usd":1.0}}"#,
+                    index * 1_000
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let output = render(&journal, false, None);
+        assert!(output.contains("8 copiés"), "{output}");
+        assert!(output.contains("+2 anciens"), "{output}");
+        assert!(!output.contains("00:00:00 │ BUY"), "{output}");
+        assert!(output.contains("00:00:02 │ BUY"), "{output}");
+        assert!(output.contains("00:00:07 │ BUY"), "{output}");
+        assert_aligned(&output);
     }
 
     #[test]

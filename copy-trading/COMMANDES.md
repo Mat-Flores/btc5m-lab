@@ -99,12 +99,13 @@ Arrête le service paper (et le désactive) ou envoie SIGTERM au run live. Véri
 bash copy-trading/deploy/report
 ```
 
-Tableau de bord du journal serveur (`/var/lib/copy-trading/journal.jsonl`) : cadre à largeur fixe, lignes TRADES/SOURCE/ordres, tableaux COMPTES et LATENCE avec tendances PnL et barres de distribution, puis état du service. Les caractères de contrôle issus du journal sont neutralisés et les valeurs trop longues tronquées pour préserver l'alignement. Les couleurs sont désactivées si la sortie n'est pas un terminal ou si `NO_COLOR` est défini.
+Tableau de bord du journal serveur (`/var/lib/copy-trading/journal.jsonl`) : cadre à largeur fixe, lignes TRADES/SOURCE/ordres, tableaux COMPTES et LATENCE avec tendances PnL et barres de distribution, comparaison « COPIES · LUI vs MOI », puis état du service. La comparaison montre les six copies les plus récentes, le prix et la mise effectivement remplis, l'écart de prix et la marge à l'achat ; les valeurs absentes restent `NULL`. Les caractères de contrôle issus du journal sont neutralisés et les valeurs trop longues tronquées pour préserver l'alignement. Les couleurs sont désactivées si la sortie n'est pas un terminal ou si `NO_COLOR` est défini.
 
 - volume copié/ignoré/indéterminé, motifs principaux, source et contrôles data-api ;
 - ordres envoyés, acquittés et remplis ; annulations/rejets à `NULL` si le journal ne les qualifie pas ;
 - PnL, rendement relatif au capital initial, positions non valorisées et tendance des trois comptes ;
 - glissements entre les comptes, latences médiane/P90 et distribution par segment ;
+- comparaison des prix/mises du wallet suivi et des fills effectifs du bot, avec moyennes et comptes de copies non remplies ;
 - état du service, run paper/live, verrou live, dernier trade et arrêt de sécurité éventuel.
 
 Un compteur mesuré à zéro s'affiche `0` ; une donnée absente ou pas encore mesurée s'affiche `NULL`, jamais comme un faux zéro.
