@@ -147,7 +147,8 @@ Tous les paramètres sont lus du fichier de config (§6) ; aucun n'est codé en 
 | `taker_hold` | quantiles_s `[[0,0.15],[0.1,0.19],[0.5,0.36],[0.9,1.5],[1,3.5]]`, `seed` 7 (ou valeur fixe) | `sim.mjs:39-40,168` ; dérivé du tableau du premier trade après un saut d'OKX et des 3 ordres réels (`engine/10-delai-appariement.md:70-75`, `engine/11-maker-polymarket.md:105`) | **pas une mesure directe** de la retenue (n = 3 ordres) `[à vérifier]` ; ne sert qu'aux sorties preneuses TP/SL (`sim.mjs:328`) |
 | `fill_bound` | `exact` | recommandation `WALLETS.md:123` | choix de modèle validé sur ordres réels |
 | `fill_lookback_ms` | **0** (obligatoire) | le défaut de `sim.mjs:166` est 150 ms (`opts.delay ?? 0.15`) ; `WALLETS.md:123` recommande 0 avec la borne `exact` ; avec 150 ms le PnL prédit tombe à 7 943 $ pour 16 383 $ réels (−52 %) (`WALLETS.md:71`) | établi sur arcsine (poses non retenues) ; annulations indécidables `[à vérifier]` |
-| `cancel_queue` | `pro_rata` ; option `behind` (toutes les annulations derrière nous) | `sim.mjs:154` ; volume prédit 1,04 (prorata) / 0,94 (derrière) / 1,09 (devant) du réel (`WALLETS.md:40`) | réalité entre prorata et « derrière » : pas tranché `[à vérifier]` |
+| `cancel_queue` | `pro_rata` ; option `behind` (toutes les annulations derrière nous) | `sim.mjs:154` ; volume prédit 1,04 (prorata) / 0,94 (derrière) / 1,09 (devant) du réel (`WALLETS.md:40`) | réalité entre prorata et « derrière » : voir `cancel_ahead_factor` |
+| `cancel_ahead_factor` | 1 (prorata entier, validé) ; recommandé 0,5 | E1, mesuré le 2026-10-28 : volume de contrôle 1,052 → 1,006 avec 0,5 ([`simulateur-maker.md`](simulateur-maker.md) §10.2) | part de la réduction prorata appliquée à la file devant nous ; sans effet avec `behind` |
 | `post_only_cross_check` | `decision` ; option `arrival` | `sim.mjs:377-378` ; un post-only qui croiserait est rejeté, pas retardé (doc officielle, voir [`ordres-et-appariement.md`](ordres-et-appariement.md)) | vérification à l'arrivée vs à la décision `[à vérifier]` |
 | `silence_ms` | 3000 | `sim.mjs:38` ; seuil de silence Polymarket 3 s (`engine/JOURNAL.md:67`) | calibré sur 17 M de messages |
 | `trading_cutoff_ms_after_end` | 2000 | `sim.mjs:258` | **aucune règle documentée** `[à vérifier]` |
@@ -207,7 +208,7 @@ Exemple de lot actuel (`engine/maker-bt/batches/x04-mix-frozen.json`) : `{"name"
   "venue": {
     "one_way_ms": 12.2, "ack_ms": 0,
     "taker_hold": { "quantiles_s": [[0,0.15],[0.1,0.19],[0.5,0.36],[0.9,1.5],[1,3.5]], "seed": 7 },
-    "fill_bound": "exact", "fill_lookback_ms": 0, "cancel_queue": "pro_rata",
+    "fill_bound": "exact", "fill_lookback_ms": 0, "cancel_queue": "pro_rata", "cancel_ahead_factor": 1,
     "post_only_cross_check": "decision", "silence_ms": 3000, "trading_cutoff_ms_after_end": 2000,
     "rebates": true, "trade_fail_rate": 0, "consume_own_liquidity": false,
     "min_size_rule": { "min_shares": 5 }
@@ -289,7 +290,7 @@ Les écarts sont de **signe opposé** (volume sur-prédit d'un côté, sous-pré
 
 | Cause | Fondement | Option envisagée (nom provisoire) |
 |---|---|---|
-| Annulations : la réalité est entre « prorata » et « toutes derrière nous » | volume prédit 1,04 / 0,94 / 1,09 selon l'hypothèse (`WALLETS.md:40`) | `cancel_queue` : étendre `pro_rata` / `behind` par une part intermédiaire |
+| Annulations : la réalité est entre « prorata » et « toutes derrière nous » | volume prédit 1,04 / 0,94 / 1,09 selon l'hypothèse (`WALLETS.md:40`) | FAIT : `cancel_ahead_factor` (§6, [`simulateur-maker.md`](simulateur-maker.md) §10.2) |
 | File prise à la décision vs à l'arrivée | `sim.mjs:396-397` lit la file au moment de la décision (`qa = book.bidSize(...)`), alors que `validate.mjs` (en-tête, l. 1-12) prend l'arrivée comme l'augmentation du carnet de exactement sa taille (traduction libre) et la file juste avant | `queue_snapshot` : `decision` / `arrival` (cause supposée, **à mesurer**) |
 | Ordres de 5 parts mal retrouvés dans les deltas | « moins sûr pour les ordres de 5 parts et ceux de ~150 parts » (`WALLETS.md:82`) | à traiter dans l'appariement de `validate` (mesure), pas dans le modèle |
 | 4 % du volume d'arcsine sans fill prédit | pose mal retrouvée, file aberrante (`WALLETS.md:83`) | idem : erreur de mesure à séparer de l'erreur de modèle |
@@ -299,7 +300,7 @@ Les écarts sont de **signe opposé** (volume sur-prédit d'un côté, sous-pré
 
 Ajustement sur les premiers jours, contrôle sur les derniers, à la date déjà utilisée par le dépôt source (`SPLIT` = 2026-10-20 00:00 UTC : `engine/maker-bt/run.mjs:18`). Le nombre de fenêtres de `validate` par jour n'est pas documenté `[à vérifier]` : le contrôle (20 au 22/10) pourrait être trop petit pour conclure, auquel cas la conclusion est *non démontrée*, jamais *corrigée*. Le split exact est à fixer avant la première mesure et à consigner.
 
-**Résultat à ce jour : aucune correction E1 n'a été mesurée.**
+**Résultat (2026-10-28)** : correction 1 mesurée, `cancel_ahead_factor` (volume de contrôle 1,052 → 1,006 avec 0,5 ; ordres exacts −0,6 point) : [`simulateur-maker.md`](simulateur-maker.md) §10. La cause « file à la décision vs à l'arrivée » n'est pas mesurable par `validate` : un ordre scripté prend déjà sa file à l'arrivée (`backtest/src/venue.rs`, `script`).
 
 ## 9. Limite connue : sorties TP/SL (décision D6)
 

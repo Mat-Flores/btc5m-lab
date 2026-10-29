@@ -42,5 +42,5 @@
 - Parité : `updown5m-staging/engine-baseline/replay.sh after` puis `cmp` avec `replay-before-*`.
 
 ## Prochaine action
-Phase A backtest COMMITÉE (2026-10-28) : validate 0 écart vs oracle Node (59 695 jumeaux, ratio 1,044, 84,1 % exacts, PnL 16 581 $), tests engine + backtest OK, parité replay identique.
-Suivant : phase B (E1, `docs/architecture-backtest.md`), vérifiée sur `updown5m-staging/dublin-live/home/{p9,p10}` ; puis supprimer ces restes et `engine-baseline/`.
+Phase A commitée. Phase B (E1) en cours, makers tiers seulement (arcsine impossible sans `data/wallets`, D9). Correction 1 FAITE et documentée (`docs/simulateur-maker.md` §10) : `venue.cancel_ahead_factor` (défaut 1 = non-régression à 0 écart vérifiée ; 0,5 recommandé : volume de contrôle 1,052 → 1,006). Mesure : `backtest validate --override f.json --export x.jsonl` (≈ 11 min, 480 Mo, 4 en parallèle OK) puis `node backtest/scripts/split.mjs x.jsonl`.
+Suivant : correction 2 candidate = surprédiction des ordres SANS file devant eux (`qa0` = 0 : ×1,076 sur l'ajustement), donc pas un effet des annulations. Instrumenter la provenance des fills dans `exact_fill` (`backtest/src/venue.rs` : trade au niveau vs traversée `lvl < qi`), sur l'ajustement seulement, puis option paramétrée + mesure. Ensuite : vérif sur p9/p10, supprimer `updown5m-staging/` restant, `backtest/README.md` (E2, absent).

@@ -39,6 +39,9 @@ pub struct VenueCfg {
     pub fill_bound: Bound,
     pub fill_lookback_ms: f64,
     pub cancel_queue: CancelQueue,
+    /// E1: share of the pro-rata thinning a cancel at our level applies to the queue ahead (1: pro rata, validated;
+    /// 0: as `behind`). Unused with `behind`.
+    pub cancel_ahead_factor: f64,
     pub post_only_cross_check: String,
     pub silence_ms: f64,
     pub trading_cutoff_ms_after_end: f64,
@@ -55,12 +58,16 @@ impl VenueCfg {
         if self.post_only_cross_check != "decision" { return no("post_only_cross_check ≠ decision"); }
         if self.trade_fail_rate != 0.0 { return no("trade_fail_rate ≠ 0"); }
         if self.consume_own_liquidity { return no("consume_own_liquidity"); }
+        if !(0.0..=1.0).contains(&self.cancel_ahead_factor) { return Err("venue.cancel_ahead_factor: between 0 and 1".into()); }
         let q = &self.taker_hold.quantiles_s;
         if q.len() < 2 || q[0][0] != 0.0 || q[q.len() - 1][0] != 1.0 || q.windows(2).any(|w| !(w[1][0] > w[0][0])) {
             return Err("venue.taker_hold.quantiles_s: [[0, s], …, [1, s]] with increasing quantiles".into());
         }
         Ok(())
     }
+
+    /// The `ahead` share of `exact_fill`.
+    pub fn cancel_ahead(&self) -> f64 { match self.cancel_queue { CancelQueue::ProRata => self.cancel_ahead_factor, CancelQueue::Behind => 0.0 } }
 }
 
 /// `rng(seed)` of sim.mjs (mulberry32).
@@ -90,8 +97,9 @@ pub fn hold_quantile(q: &[[f64; 2]], u: f64) -> f64 {
 pub struct Order { pub s: usize, pub q: f64, pub r: f64, pub qa: f64 }
 
 /// `exactFill` (sim.mjs:148-156): shares a change of the Up book fills for bid `o` on side `s`; `o.qa` updated.
-/// typ 1 bid / 2 ask, level `ch_i` (thousandths), size `ch_old` → `ch_size`, `v` traded volume of the change.
-pub fn exact_fill(o: &mut Order, s: usize, typ: u8, ch_i: f64, ch_old: f64, ch_size: f64, v: f64, cq: CancelQueue) -> f64 {
+/// typ 1 bid / 2 ask, level `ch_i` (thousandths), size `ch_old` → `ch_size`, `v` traded volume of the change; `ahead`:
+/// share of the pro-rata thinning a cancel applies to the queue ahead (1 pro rata, 0 behind: `VenueCfg::cancel_ahead`).
+pub fn exact_fill(o: &mut Order, s: usize, typ: u8, ch_i: f64, ch_old: f64, ch_size: f64, v: f64, ahead: f64) -> f64 {
     let qi = jround(o.q * 1000.0);
     let is_bid = (s == 0) == (typ == 1);
     let lvl = if s == 0 { ch_i } else { 1000.0 - ch_i };
@@ -99,7 +107,7 @@ pub fn exact_fill(o: &mut Order, s: usize, typ: u8, ch_i: f64, ch_old: f64, ch_s
     if v > 0.0 && lvl < qi { return v; }
     if lvl != qi { return 0.0; }
     if v > 0.0 { let used = jmin(o.qa, v); o.qa -= used; return v - used; }
-    if cq == CancelQueue::ProRata && ch_old > ch_size && ch_old > 0.0 { o.qa -= (ch_old - ch_size) * o.qa / ch_old; }
+    if ahead > 0.0 && ch_old > ch_size && ch_old > 0.0 { o.qa -= ahead * (ch_old - ch_size) * o.qa / ch_old; }
     0.0
 }
 
@@ -188,7 +196,7 @@ impl<'a> WindowVenue<'a> {
             let take = match self.cfg.fill_bound {
                 Bound::Exact => {
                     let v = self.labels.map_or(0.0, |l| l[j] as f64);
-                    exact_fill(&mut self.orders[id], s, typ, ch_i, ch_old, size, v, self.cfg.cancel_queue)
+                    exact_fill(&mut self.orders[id], s, typ, ch_i, ch_old, size, v, self.cfg.cancel_ahead())
                 }
                 b => {
                     let ba = self.book.best_ask(s);
@@ -237,7 +245,7 @@ mod tests {
     /// sim.test.mjs « exact: trades take the queue first in first out, cancels thin it pro rata, a trade below our bid meets us ».
     #[test]
     fn exact_fill_is_fifo_pro_rata_and_met_below() {
-        let pr = CancelQueue::ProRata;
+        let pr = 1.0;
         let mut o = Order { s: 0, q: 0.45, r: 50.0, qa: 100.0 };
         assert_eq!(exact_fill(&mut o, 0, 1, 450.0, 200.0, 160.0, 40.0, pr), 0.0);
         assert_eq!(o.qa, 60.0);
@@ -249,8 +257,11 @@ mod tests {
         assert_eq!(exact_fill(&mut Order { s: 1, q: 0.45, r: 50.0, qa: 0.0 }, 1, 2, 550.0, 90.0, 70.0, 20.0, pr), 20.0);
         // `behind`: a cancel leaves the queue ahead as it was
         let mut b = Order { s: 0, q: 0.45, r: 50.0, qa: 100.0 };
-        exact_fill(&mut b, 0, 1, 450.0, 160.0, 80.0, 0.0, CancelQueue::Behind);
+        exact_fill(&mut b, 0, 1, 450.0, 160.0, 80.0, 0.0, 0.0);
         assert_eq!(b.qa, 100.0);
+        // in between: half the pro-rata thinning (100 − 0.5 × 80 × 100 / 160)
+        exact_fill(&mut b, 0, 1, 450.0, 160.0, 80.0, 0.0, 0.5);
+        assert_eq!(b.qa, 75.0);
     }
 
     #[test]

@@ -28,6 +28,7 @@
     "fill_bound": "exact",
     "fill_lookback_ms": 0,
     "cancel_queue": "pro_rata",
+    "cancel_ahead_factor": 1,
     "post_only_cross_check": "decision",
     "silence_ms": 3000,
     "trading_cutoff_ms_after_end": 2000,

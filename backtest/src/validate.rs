@@ -120,7 +120,7 @@ pub fn twins(src: &Source, start: u64, book: &[f32], delay: f64) -> Option<(Vec<
             let sz = ev[COLS * j + 4] as f64;
             let old = if (0.0..3003.0).contains(&k) { let k = k as usize; let old = bk[k]; bk[k] = sz; old } else { f64::NAN };
             if j <= a.0 || t == snap || ts - delay >= end { j += 1; continue; }
-            let take = engine_strategy::model::jmin(o.r, exact_fill(&mut o, s, typ2 as u8, ci, old, sz, vol[j] as f64, crate::venue::CancelQueue::ProRata));
+            let take = engine_strategy::model::jmin(o.r, exact_fill(&mut o, s, typ2 as u8, ci, old, sz, vol[j] as f64, 1.0));
             if take > 1e-9 { o.r -= take; pred.push((ts, take)); }
             j += 1;
         }

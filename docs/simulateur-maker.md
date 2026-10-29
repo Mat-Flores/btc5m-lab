@@ -178,7 +178,32 @@ Voir [`architecture-backtest.md`](architecture-backtest.md) §6.4 pour la liste 
 
 ## 10. Corrections E1 des décalages avec le réel
 
-Écarts à réduire : volume ×1,044 / PnL −4,3 % / ordres exacts 84,1 % (autres makers) ; volume ×0,958 / PnL +8,4 % / 71 % (arcsine). **Aucune correction n'est encore mesurée.** La méthode (options nouvelles et paramétrées, défaut = comportement validé, mesure avant/après sur `validate` avec split temporel, cause documentée) est décrite dans [`architecture-backtest.md`](architecture-backtest.md) §8. Ce document recevra le résultat (gain, risque de surajustement, valeurs retenues) : **à compléter après les mesures**.
+Écarts de départ : volume ×1,044 / PnL −4,3 % / ordres exacts 84,1 % (autres makers) ; arcsine non mesurable sans `data/wallets` (D9), donc **makers tiers seulement**. Méthode : [`architecture-backtest.md`](architecture-backtest.md) §8. Mesure : `backtest validate` (export par jumeau) puis `node backtest/scripts/split.mjs <export>`, split au 2026-10-20 00:00 UTC (ajustement 15→19/10, 38 218 jumeaux ; contrôle 20→22/10, 21 477 jumeaux).
+
+### 10.1 Où est l'écart (ajustement seulement, avant correction)
+
+- Ordres **remplis en partie puis annulés** : volume prédit ×1,438 (57 564 parts en trop sur 96 560 réelles). C'est l'essentiel de la surprédiction.
+- Ordres **remplis en entier** : ×0,974 (sous-prédits).
+- Ordres **sans file devant eux** (`qa0` = 0) : ×1,076. Ce n'est pas un effet des annulations (aucune file à amincir) : cause non identifiée, `[à mesurer]` (provenance des fills : au niveau ou par traversée).
+
+### 10.2 Correction 1 : part des annulations devant nous (`venue.cancel_ahead_factor`, 2026-10-28)
+
+Cause documentée : le volume prédit vaut 1,04 si les annulations du niveau amincissent la file devant nous au prorata, 0,94 si elles sont toutes derrière nous (`WALLETS.md:40`) ; la réalité est entre les deux. Option : une annulation au niveau réduit la file devant nous de `facteur × prorata` (1 = prorata, comportement validé, défaut ; 0 = `behind`). Critère fixé avant la mesure : facteur dont le volume d'ajustement est le plus proche de 1.
+
+| Facteur | Ajustement : volume / exacts / PnL (réel 3 716 $) | Contrôle : volume / exacts / PnL (réel 13 615 $) |
+| --- | --- | --- |
+| 0 (`behind`) | 0,940 / 83,2 % / 2 338 $ (−37,1 %) | 0,949 / 82,8 % / 11 271 $ (−17,2 %) |
+| 0,25 | 0,969 / 83,5 % / 3 328 $ (−10,4 %) | 0,974 / 82,8 % / 12 540 $ (−7,9 %) |
+| **0,5** | **0,999** / 83,8 % / 3 125 $ (−15,9 %) | **1,006** / 83,0 % / 13 697 $ (+0,6 %) |
+| 0,75 | 1,022 / 84,0 % / 2 888 $ (−22,3 %) | 1,032 / 83,2 % / 13 727 $ (+0,8 %) |
+| 1 (défaut, validé) | 1,040 / 84,4 % / 2 808 $ (−24,4 %) | 1,052 / 83,6 % / 13 773 $ (+1,2 %) |
+
+Sur les 59 695 jumeaux avec le facteur 0,5 : volume 1,002, ordres exacts 83,5 %, PnL 16 822 $ pour 17 331 $ réels (−2,9 %, contre −4,3 %).
+
+- **Gain** : le biais de volume disparaît, et le contrôle le confirme (1,052 → 1,006). L'erreur de PnL totale passe de −4,3 % à −2,9 %.
+- **Coût** : −0,6 point d'ordres exacts. La correction règle le biais global mais pas l'erreur ordre par ordre : elle retarde aussi les ordres remplis en entier, déjà sous-prédits.
+- **Surajustement** : risque faible (un seul paramètre, choisi sur l'ajustement, confirmé en contrôle sur le volume). Le PnL d'ajustement (3 716 $ réels) est trop petit pour départager les facteurs.
+- **Valeur retenue** : le défaut reste 1, pour que la non-régression reste vraie (vérifié : 0 écart avec l'oracle). Valeur recommandée pour les backtests : **0,5**, à passer en surcharge (`{"venue": {"cancel_ahead_factor": 0.5}}`).
 
 ## 11. Points à vérifier
 
