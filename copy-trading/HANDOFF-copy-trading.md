@@ -13,12 +13,11 @@
 - UI vérifiée sur données réelles (journal taker du 29 et run maker en direct) par pilotage DevTools : survol → jumeaux allumés liste/graphique/cascade ; clic → sélection, carnet, « Suivre le direct ». 28 tests Rust + 2 tests modèle verts.
 - Revue finale impeccable appliquée (01a633a, 3be03e9 : DNS rebinding, rendu, focus, carnet…) ; `DESIGN.md` + `.impeccable/design.json` écrits depuis l'UI livrée (North Star « L'écart comme forme »). UI terminée.
 - 2026-10-30 (non commité) : `ANALYSE-2026-10-30.md` (profil du wallet, rejeu 1 000 $ sur 30 j, 10 bugs, goulots, choix de wallet) ; `buy: proportional` (+ `leverage`, `max_frac`), sortie au point mort s'il sort gagnant et nous perdant (`exit_price`), annulation des ordres posés à la résolution ; config.example à 1 000 $ / proportional ; scripts `analyse/` ; 30 tests verts. Recherche bot d'actualité dans `actu-bot/` (racine).
-- Run de test maker `~/ct-maker` toujours en cours sur dublin-dry-run (lancé 2026-10-29 17:11 UTC) ; service paper principal NON relancé (consigne).
+- 2026-10-30 19:45 UTC : serveur remis à zéro avec accord (journal du service et `~/ct-maker` effacés, copies locales non versionnées) ; service redéployé : paper, 1 000 $, maker, proportional, avec tous les correctifs. Seul ce bot tourne.
 
 **Reste à faire**
 0. Journaux lus et bugs 1-9 et 11 corrigés (ANALYSE §5-6, 32 tests verts, non commité, non déployé). Le maker +11,63 $ du run `~/ct-maker` est fictif (fills après le coup d'envoi).
-1. Basculer le service sur la stratégie maker = redéploiement (nouveau run) : seulement sur accord ; puis arrêter `~/ct-maker` (`pkill -f maker.json`).
-2. Lire dans `~/ct-maker/journal.jsonl` les `check` `trade_side` (sens du preneur) et les `order fill`.
+1. Bilan du nouveau run : lignes `trade_side` (ok ?), annulations « coup d'envoi », `exit_price`, taux de remplissage maker.
 3. Live maker non vérifié sur ordre réel (GTC, annulation, `size_matched`) : premier test réel uniquement avec accord.
 4. Plus tard : analyse statistique de ses ordres (`trade.his_order`, `stat`) ; vérification des news par IA (idée utilisateur).
 
@@ -38,4 +37,4 @@
 - Tests : WSL `CARGO_TARGET_DIR=$HOME/ct-target cargo test --release` dans copy-trading/ ; `node --test copy-trading/ui/model.test.mjs`.
 - UI : `python copy-trading/ui/serve.py` (service) ou `--journal /home/ubuntu/ct-maker/journal.jsonl --no-sudo --port 8767` (test), puis http://127.0.0.1:8765/.
 
-**Prochaine action** : demander l'accord pour commiter (`git commit -- copy-trading actu-bot`) puis pour redéployer le service paper (1 000 $, maker, proportional) et arrêter `~/ct-maker` ; ensuite vérifier dans le journal les lignes `trade_side`, les annulations « coup d'envoi » et `exit_price`. (Les journaux se lisent par `source deploy/lib.sh; load_env; rsh "gzip -c $R_JOURNAL"`.) Ancienne action : lire `~/ct-maker/journal.jsonl` sur dublin-dry-run (lecture seule) : `check` `trade_side` et `order fill` ; en faire le bilan, puis demander l'accord pour basculer le service sur maker.
+**Prochaine action** : après quelques heures de run, lire le journal (`source deploy/lib.sh; load_env; rsh "cat $R_JOURNAL"`, éviter les guillemets dans `rsh`) et faire le bilan du point 1 ; proposer le commit des correctifs (book.rs, chain.rs, main.rs, ANALYSE), déployés mais non commités.
