@@ -1,7 +1,7 @@
 // node --test copy-trading/ui/model.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createModel, ingest, tiles, markets, cascade, windowStart, performance } from './model.js';
+import { createModel, ingest, tiles, markets, cascade, windowStart, performance, myPosition } from './model.js';
 
 const J = [
   { t: 'start', at: 0, mode: 'paper', cash: 20 },
@@ -56,4 +56,27 @@ test('une fenêtre ne remonte jamais avant le début du run', () => {
   ingest(m, { t: 'start', at: 5_000_000 });
   assert.equal(windowStart(m, '1h', 6_000_000), 5_000_000);
   assert.equal(windowStart(m, '1h', 20_000_000), 20_000_000 - 3600e3);
+});
+
+test('ma position suit mes fills, ventes et résolution ; le prix d’entrée ne compte que les achats', () => {
+  const m = createModel();
+  const lat = { obs: 1, dec: 2 };
+  for (const o of [
+    { t: 'start', at: 1, cash: 1000 },
+    { t: 'order', ev: 'post', at: 2, id: 1, token: 'a', side: 'BUY', price: 0.5, size: 10, filled: 10, kickoff: 900 },
+    { t: 'trade', at: 2, tx: 'x', token: 'a', side: 'BUY', his_price: 0.5, lat, decision: 'buy', order: { id: 1 } },
+    { t: 'state', at: 3, real_pos: { a: 10 }, marks: { a: 0.6 } },
+    { t: 'order', ev: 'post', at: 4, id: 2, token: 'a', side: 'SELL', price: 0.54, size: 4, filled: 4 },
+    { t: 'trade', at: 4, tx: 'y', token: 'a', side: 'SELL', his_price: 0.52, lat, decision: 'sell', order: { id: 2 } },
+  ]) ingest(m, o);
+  assert.equal(m.orders.get(1).kickoff, 900);
+  // l'état date d'avant la vente : la position vient des fills
+  let p = myPosition(m, 'a');
+  assert.ok(Math.abs(p.shares - 6) < 1e-9 && Math.abs(p.pnl - (4 * 0.54 + 6 * 0.6 - 5)) < 1e-9 && p.avg === 0.5);
+  const k = tiles(m, 0);
+  assert.deepEqual([k.hisPrice, k.myPrice], [0.5, 0.5]);
+  ingest(m, { t: 'resolution', at: 5, token: 'a', payout: 1 });
+  p = myPosition(m, 'a');
+  assert.ok(p.shares === 0 && Math.abs(p.pnl - (4 * 0.54 + 6 - 5)) < 1e-9);
+  assert.equal(markets(m)[0].shares, 0);
 });

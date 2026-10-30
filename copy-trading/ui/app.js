@@ -1,6 +1,6 @@
 // UI de copy-trading : un seul état (journal + données publiques + choix de l'opérateur), rendu groupé par image.
 // Les composants sont liés par des clés communes posées en attributs : data-token (marché), data-tx (son trade).
-import { createModel, ingest, windowStart, tiles, markets, cascade, hisLevels, myPosition, performance, capital, cancelAfterMs } from './model.js';
+import { createModel, ingest, windowStart, tiles, markets, cascade, hisLevels, myPosition, entryPrices, performance, capital, cancelAfterMs } from './model.js';
 
 let M = createModel();
 const UI = { range: '6h', token: null, pinned: false, hover: null, filter: 'tous', conn: 'connexion', ready: false };
@@ -64,7 +64,7 @@ function render() {
 // ---- barre --------------------------------------------------------------------------------------------------------
 function nav(t) {
   const r = M.run, s = r?.strategy;
-  const strat = s ? `${s.exec === 'taker' ? 'Taker' : 'Maker'} · ${s.buy === 'first_fill' ? '1re entrée' : 'cumul'} · ${s.sell === 'all' ? 'tout' : 'lots'} · ${Math.round(s.cancel_after_min / 60)} h`
+  const strat = s ? `${s.exec === 'taker' ? 'Taker' : 'Maker'} · ${s.buy === 'first_fill' ? '1re entrée' : s.buy === 'proportional' ? `proportionnel ×${s.leverage ?? 1} · max ${Math.round((s.max_frac ?? 0.15) * 100)} %` : 'cumul'} · ${s.sell === 'all' ? 'tout' : 'lots'} · ${Math.round(s.cancel_after_min / 60)} h`
     : M.trades.some((x) => x.orderId != null) ? 'Maker' : M.trades.some((x) => x.fillShares != null) ? 'Taker' : 'Stratégie —';
   const fd = (name, label) => {
     const f = M.feed[name];
@@ -84,7 +84,7 @@ function nav(t) {
     <span class="sp"></span>
     ${connBad ? `<span class="chip alert"><span class="dot bad"></span>Journal ${esc(UI.conn)}</span>` : ''}
     ${M.halt ? `<span class="chip alert" title="${esc(M.halt.reason)}">Bot arrêté</span>` : ''}
-    <span class="chip">${fd('chain', 'Chaîne')} <b>${lat == null ? '' : dur(lat)}</b> · ${fd('market', 'Market')} · <b>${M.checks.ok}</b> contrôles${M.checks.bad ? ` · <span class="dn">${M.checks.bad} écarts</span>` : ''}${M.resyncs ? ` · ${M.resyncs} resync` : ''}</span>
+    <span class="chip">${fd('chain', 'Chaîne')} <b>${lat == null ? '' : dur(lat)}</b> · ${fd('market', 'Market')} · <b>${M.checks.ok}</b> contrôles${M.checks.bad ? ` · <span class="dn">${M.checks.bad} écarts</span>` : ''}${M.sideChecks.bad ? ` · <span class="dn">${M.sideChecks.bad} sens faux</span>` : ''}${M.resyncs ? ` · ${M.resyncs} resync` : ''}</span>
     <div class="tabs" role="group" aria-label="Période">${['1h', '6h', '1j', 'run'].map((k) => `<button data-range="${k}" aria-pressed="${UI.range === k}">${k === 'run' ? 'Run' : k.toUpperCase()}</button>`).join('')}</div>
     ${stale ? `<span class="chip alert"><span class="dot bad"></span>Journal muet depuis ${dur(age)}</span>` : `<span class="clock">${age == null ? 'en attente' : age < 2 ? 'à l’instant' : `il y a ${dur(age)}`}</span>`}`);
 }
@@ -101,7 +101,7 @@ function niceTicks(lo, hi, n) {
 function perf(from, t) {
   const el = $('perf'), w = Math.max(300, el.clientWidth - 2), h = 178;
   const pts = performance(M, from);
-  const head = `<div class="hd"><h2>Performance</h2><span class="sub">en % du capital</span><div class="lg"><span><i style="background:var(--him)"></i>Lui</span><span><i style="background:var(--me)"></i>Moi (réel)</span><span><i style="background:var(--t3)"></i>Moi à ses prix</span></div></div>`;
+  const head = `<div class="hd"><h2>Performance</h2><span class="sub">en % du capital</span><div class="lg"><span><i style="background:var(--him)"></i>Lui</span><span><i style="background:var(--me)"></i>Moi (réel)</span><span><i style="background:var(--t3)"></i><span title="Tous mes ordres, même non remplis, comptés au prix de son fill">Moi si tout rempli à ses prix</span></span></div></div>`;
   if (pts.length < 2) return put('perf', `${head}<div class="empty">Courbes disponibles après deux relevés (un par minute).</div>`);
   const vals = pts.flatMap((p) => [p.his, p.real, p.obs]).filter((v) => v != null);
   let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
@@ -296,13 +296,14 @@ function side(t) {
   if (!tok) { put('cmp', ''); put('book', `<div class="empty">Choisis un marché.</div>`); return; }
   wantBook(tok);
   const his = EXT.positions.get(tok), me = myPosition(M, tok);
-  const meVal = me.mark != null && me.avg != null ? me.shares * (me.mark - me.avg) : null;
+  const meVal = me.pnl;
+  const entry = entryPrices(M, M.trades.filter((x) => x.token === tok));
   const hisSum = (k) => { const b = M.trades.filter((x) => x.token === k && x.buy); const v = b.reduce((a, x) => a + (x.usd || 0), 0); const hv = M.states.at(-1)?.his; return b.length ? `Ses achats ici pendant le run : ${usd(v)} en ${b.length} fills${hv ? ` (${N2.format(v / hv * 100)} % de son portefeuille)` : ''}.` : 'Pas d’achat de lui ici pendant le run.'; };
   put('cmp', `<h3>Position sur ce marché</h3>
     <div class="cr" style="border-top:0;color:var(--t3);font-size:12px"><span></span><span>Parts</span><span>Prix moyen</span><span>PnL</span></div>
     <div class="cr"><span class="who h">Lui</span><span>${his ? shares(his.size) : loading()}</span><span>${his ? cents(his.avgPrice) : loading()}</span><span class="${!his ? '' : his.cashPnl < 0 ? 'dn' : his.cashPnl > 0 ? 'up' : ''}">${his ? sgn(his.cashPnl, usd) : loading()}</span></div>
     <div class="cr"><span class="who m">Moi</span><span>${shares(me.shares)}</span><span>${cents(me.avg)}</span><span class="${meVal < -0.005 ? 'dn' : meVal > 0.005 ? 'up' : ''}">${meVal == null ? '—' : sgn(meVal, usd)}</span></div>
-    <div class="small" style="margin-top:8px">${hisSum(tok)}${his && me.avg != null && his.avgPrice ? ` Écart de prix moyen : ${sgn((me.avg - his.avgPrice) * 100, (v) => N1.format(v))}¢.` : ''}</div>`);
+    <div class="small" style="margin-top:8px">${hisSum(tok)}${entry.mine != null ? ` Écart à son prix aux fills copiés : ${sgn((entry.mine - entry.his) * 100, (v) => N1.format(v))}¢.` : ''}</div>`);
   const b = EXT.bookToken === tok ? EXT.book : null;
   const mine = [...M.orders.values()].filter((o) => o.token === tok && o.status === 'open');
   const hisL = hisLevels(M, tok, t);
@@ -329,7 +330,7 @@ function side(t) {
     return `<h3 style="margin-top:16px">Ma place dans la file à ${cents(o.price)}</h3>
       <div class="qb" role="progressbar" aria-valuemin="0" aria-valuemax="${tot}" aria-valuenow="${done}"><b style="width:${(done / tot * 100).toFixed(1)}%"></b></div>
       <div class="qrow small"><span>${shares(done)} parts passées devant moi</span><span>${shares(o.ahead)} restantes</span></div>
-      <div class="small" style="margin-top:8px">Posé à ${hms(o.posted)} · ${shares(o.filled)} / ${shares(o.size)} rempli · annulation auto si plus aucun fill de lui avant ${hm(lastHis + cancelAfterMs(M))}</div>`;
+      <div class="small" style="margin-top:8px">Posé à ${hms(o.posted)} · ${shares(o.filled)} / ${shares(o.size)} rempli · ${o.kickoff && o.kickoff < lastHis + cancelAfterMs(M) ? `annulé par Polymarket au coup d’envoi, ${hm(o.kickoff)}` : `annulation auto si plus aucun fill de lui avant ${hm(lastHis + cancelAfterMs(M))}`}</div>`;
   }).join('');
   put('book', `<h3>Carnet${outcome ? ` · ${esc(outcome === 'Yes' ? 'Oui' : outcome === 'No' ? 'Non' : outcome)}` : ''}</h3>${bookHtml}${queue || '<h3 style="margin-top:16px">Ma place dans la file</h3><div class="small">Aucun ordre ouvert de moi sur ce marché.</div>'}`);
 }

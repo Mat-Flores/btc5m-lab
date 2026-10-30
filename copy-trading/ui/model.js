@@ -4,7 +4,7 @@
 export function createModel() {
   return {
     runs: 0, run: null, trades: [], orders: new Map(), states: [], stats: [], warns: [], halt: null, stop: null,
-    checks: { ok: 0, bad: 0 }, sideChecks: { ok: 0, bad: 0 }, feed: {}, resyncs: 0, last: 0, version: 0,
+    checks: { ok: 0, bad: 0 }, sideChecks: { ok: 0, bad: 0 }, resolved: new Map(), feed: {}, resyncs: 0, last: 0, version: 0,
   };
 }
 
@@ -40,7 +40,7 @@ export function ingest(m, o) {
         const ord = {
           id: id ?? -m.orders.size - 1, token: String(o.token ?? ''), buy: o.side === 'BUY', price: num(o.price), size: num(o.size) ?? 0,
           filled: 0, ahead0: num(o.ahead), ahead: num(o.ahead), aheadSeries: [], posted: at, fills: [], end: null,
-          status: o.ev === 'rejected' ? 'rejected' : 'open', cause: null, wrong: false, tx: null,
+          status: o.ev === 'rejected' ? 'rejected' : 'open', cause: null, wrong: false, tx: null, kickoff: num(o.kickoff),
         };
         if (ord.ahead != null) ord.aheadSeries.push([at, ord.ahead]);
         const now = num(o.filled) ?? 0;
@@ -88,6 +88,7 @@ export function ingest(m, o) {
       if (typeof o.health === 'string' && o.health.startsWith('resync')) m.resyncs++;
       else m.feed[o.source] = { at, health: String(o.health) };
       break;
+    case 'resolution': m.resolved.set(String(o.token), num(o.payout)); break;
     case 'warn': m.warns.push({ at, what: o.what }); break;
     case 'halt': m.halt = { at, reason: o.reason }; break;
     case 'stop': m.stop = { at, reason: o.reason }; break;
@@ -130,6 +131,19 @@ export function performance(m, from) {
 /** Instant où mon ordre a quitté la file : dernier fill d'un ordre rempli, sinon rien. */
 function filledAt(o) { return o.status === 'filled' && o.fills.length ? o.fills[o.fills.length - 1].at : null; }
 
+/** Prix d'entrée : mes achats remplis comparés au prix de son fill déclencheur, pondérés par mes parts. Achats seuls : une
+ *  vente au-dessus de son prix (point mort) est voulue, ce n'est pas un écart d'entrée. */
+export function entryPrices(m, trades) {
+  let his = 0, mine = 0, sh = 0;
+  for (const t of trades) {
+    if (!t.buy) continue;
+    const o = t.orderId != null ? m.orders.get(t.orderId) : null;
+    const f = o ? o.fills.reduce((a, x) => [a[0] + x.shares, a[1] + x.shares * x.price], [0, 0]) : t.fillShares ? [t.fillShares, t.fillUsd] : [0, 0];
+    if (f[0] > 0 && t.price != null) { sh += f[0]; mine += f[1]; his += f[0] * t.price; }
+  }
+  return { his: sh ? his / sh : null, mine: sh ? mine / sh : null };
+}
+
 /** Les quatre comparaisons du haut. Tout ce qui n'est pas mesuré reste `null`. */
 export function tiles(m, from) {
   const perf = performance(m, -Infinity);
@@ -137,20 +151,14 @@ export function tiles(m, from) {
   const trades = m.trades.filter((t) => t.at >= from);
   const delays = trades.filter((t) => t.lat.src != null && t.lat.dec != null).map((t) => (t.lat.dec - t.lat.src) / 1000);
   const api = trades.filter((t) => t.src === 'data-api').length;
-  // prix : mes fills comparés au prix de son fill déclencheur, pondérés par mes parts
-  let his = 0, mine = 0, sh = 0;
-  for (const t of trades) {
-    const o = t.orderId != null ? m.orders.get(t.orderId) : null;
-    const f = o ? o.fills.reduce((a, x) => [a[0] + x.shares, a[1] + x.shares * x.price], [0, 0]) : t.fillShares ? [t.fillShares, t.fillUsd] : [0, 0];
-    if (f[0] > 0 && t.price != null) { sh += f[0]; mine += f[1]; his += f[0] * t.price; }
-  }
+  const entry = entryPrices(m, trades);
   const orders = [...m.orders.values()].filter((o) => o.posted >= from);
   // en taker, un trade copié est un ordre envoyé ; il est rempli s'il a trouvé de la liquidité
   const taken = trades.filter((t) => t.orderId == null && t.fillShares != null);
   return {
     hisPct: last.his ?? null, myPct: last.real ?? null, hisValue: m.states.at(-1)?.his ?? null, myValue: m.states.at(-1)?.real?.value ?? null,
     lastMatch: trades.at(-1)?.at ?? null, delayMed: quantile(delays, 0.5), delayP90: quantile(delays, 0.9), apiShare: trades.length ? api / trades.length : null,
-    hisPrice: sh ? his / sh : null, myPrice: sh ? mine / sh : null,
+    hisPrice: entry.his, myPrice: entry.mine,
     hisFills: trades.length, posted: orders.length + taken.length, filled: orders.filter((o) => o.status === 'filled').length + taken.filter((t) => t.fillShares > 0).length,
     open: orders.filter((o) => o.status === 'open').length, wrong: orders.filter((o) => o.wrong).length,
   };
@@ -176,11 +184,9 @@ export function markets(m) {
     k.orders.push(o);
     k.wrong ||= o.wrong;
   }
-  const st = m.states.at(-1);
   return [...by.values()].map((k) => {
     const open = k.orders.filter((o) => o.status === 'open');
-    const shares = num(st?.pos?.[k.token]) ?? 0;
-    const mark = num(st?.marks?.[k.token]) ?? k.lastPrice;
+    const { shares, mark } = myPosition(m, k.token);
     let state = 'observé';
     if (k.wrong) state = 'annulé à tort';
     else if (open.some((o) => o.filled > 0)) state = 'partiel';
@@ -218,16 +224,28 @@ export function hisLevels(m, token, now) {
   return [...lv.values()];
 }
 
-/** Ma position sur un token : parts (dernier état), prix moyen d'achat (mes fills). */
+/** Ma position sur un token, recalculée de mes fills (l'état du bot date de la minute) : parts restantes, prix moyen d'achat,
+ *  PnL réalisé + latent. Un marché résolu ne laisse plus de parts : elles ont été payées. */
 export function myPosition(m, token) {
-  let sh = 0, usd = 0;
+  let bought = 0, cost = 0, sold = 0, got = 0;
   for (const o of m.orders.values()) {
-    if (o.token !== token || !o.buy) continue;
-    for (const f of o.fills) { sh += f.shares; usd += f.shares * f.price; }
+    if (o.token !== token) continue;
+    for (const f of o.fills) {
+      if (o.buy) { bought += f.shares; cost += f.shares * f.price; } else { sold += f.shares; got += f.shares * f.price; }
+    }
   }
-  for (const t of m.trades) if (t.token === token && t.buy && !t.orderId && t.fillShares > 0) { sh += t.fillShares; usd += t.fillUsd; }
-  const st = m.states.at(-1);
+  for (const t of m.trades) {
+    if (t.token !== token || t.orderId != null || !(t.fillShares > 0)) continue;
+    if (t.buy) { bought += t.fillShares; cost += t.fillUsd; } else { sold += t.fillShares; got += t.fillUsd; }
+  }
+  const left = bought - sold > 1e-9 ? bought - sold : 0;
+  const payout = m.resolved.get(token) ?? null;
   // même repli que markets() : sans prix relevé, le dernier prix auquel il a traité
   const lastPrice = [...m.trades].reverse().find((t) => t.token === token && t.price != null)?.price ?? null;
-  return { shares: num(st?.pos?.[token]) ?? sh, avg: sh ? usd / sh : null, mark: num(st?.marks?.[token]) ?? lastPrice };
+  const mark = num(m.states.at(-1)?.marks?.[token]) ?? lastPrice;
+  const end = payout ?? mark;
+  return {
+    shares: payout != null ? 0 : left, avg: bought ? cost / bought : null, mark,
+    pnl: !bought && !sold ? null : !left ? got - cost : end == null ? null : got + left * end - cost,
+  };
 }

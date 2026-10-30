@@ -13,6 +13,7 @@
 - UI vérifiée sur données réelles (journal taker du 29 et run maker en direct) par pilotage DevTools : survol → jumeaux allumés liste/graphique/cascade ; clic → sélection, carnet, « Suivre le direct ». 28 tests Rust + 2 tests modèle verts.
 - Revue finale impeccable appliquée (01a633a, 3be03e9 : DNS rebinding, rendu, focus, carnet…) ; `DESIGN.md` + `.impeccable/design.json` écrits depuis l'UI livrée (North Star « L'écart comme forme »). UI terminée.
 - 2026-10-30 (non commité) : `ANALYSE-2026-10-30.md` (profil du wallet, rejeu 1 000 $ sur 30 j, 10 bugs, goulots, choix de wallet) ; `buy: proportional` (+ `leverage`, `max_frac`), sortie au point mort s'il sort gagnant et nous perdant (`exit_price`), annulation des ordres posés à la résolution ; config.example à 1 000 $ / proportional ; scripts `analyse/` ; 30 tests verts. Recherche bot d'actualité dans `actu-bot/` (racine).
+- 2026-10-30 20:20 UTC environ : run relancé avec les bugs 13-15 (trade_side par token, trades du token opposé, motifs) ; UI corrigée (bug 16). Le redémarrage remet les comptes à zéro : l'état du bot n'est pas persisté, le journal si.
 - 2026-10-30 19:45 UTC : serveur remis à zéro avec accord (journal du service et `~/ct-maker` effacés, copies locales non versionnées) ; service redéployé : paper, 1 000 $, maker, proportional, avec tous les correctifs. Seul ce bot tourne.
 
 **Reste à faire**

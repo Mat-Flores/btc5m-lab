@@ -343,8 +343,11 @@ struct Bot {
     /// Trades publics déjà appliqués à mes ordres posés (paper), par hash de transaction.
     applied: HashSet<String>,
     side_checks: u32,
-    /// Sens du preneur de chaque trade public vu sur le websocket market (il arrive avant le log de la chaîne).
+    /// Sens du preneur de chaque trade public du websocket market, par tx + token (il arrive avant le log de la chaîne).
+    /// Le token compte : un preneur peut acheter le token opposé, le trade public est alors sur cet autre token.
     ws_side: HashMap<String, bool>,
+    /// Token opposé de chaque token des marchés copiés : un achat du preneur sur l'un remplit les achats posés sur l'autre.
+    complement: HashMap<String, String>,
     /// Coup d'envoi par marché (`game_start_time` du CLOB ; None : pas un match). Polymarket annule alors les ordres posés.
     game_start: HashMap<String, Option<u64>>,
 }
@@ -430,7 +433,7 @@ impl Bot {
         line["passive"] = json!(f.passive);
         // contrôle du sens : le trade public de son fill (websocket, arrivé avant la chaîne) a un preneur du sens opposé
         // au sien s'il était posé, du même sens s'il a pris le carnet
-        if let Some(taker_buy) = self.ws_side.get(&f.tx).copied() {
+        if let Some(taker_buy) = self.ws_side.get(&format!("{}:{}", f.tx, f.token)).copied() {
             if src == "chain" && self.side_checks < 50 {
                 self.side_checks += 1;
                 self.log(json!({ "t": "check", "kind": "trade_side", "tx": f.tx, "passive": f.passive, "ok": (taker_buy != f.buy) == f.passive }));
@@ -582,14 +585,29 @@ impl Bot {
             .map(|c| c.0 / c.1)
     }
 
-    /// Coup d'envoi du marché, lu une fois par marché sur le CLOB.
-    async fn learn_kickoff(&mut self, market: &str) {
+    /// Coup d'envoi et tokens du marché, lus une fois par marché sur le CLOB ; le token opposé rejoint le websocket.
+    async fn learn_market(&mut self, market: &str) {
         if self.game_start.contains_key(market) {
             return;
         }
-        if let Ok(v) = get_json(&format!("{CLOB}/markets/{market}")).await {
-            self.game_start
-                .insert(market.into(), v["game_start_time"].as_str().and_then(utc_ms));
+        let Ok(v) = get_json(&format!("{CLOB}/markets/{market}")).await else {
+            return;
+        };
+        self.game_start
+            .insert(market.into(), v["game_start_time"].as_str().and_then(utc_ms));
+        let ids: Vec<String> = v["tokens"]
+            .as_array()
+            .map(|t| t.iter().filter_map(|x| x["token_id"].as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        if let [a, b] = ids.as_slice() {
+            self.complement.insert(a.clone(), b.clone());
+            self.complement.insert(b.clone(), a.clone());
+            for t in [a, b] {
+                self.market_of.insert(t.clone(), market.into());
+                if self.subscribed.insert(t.clone()) {
+                    let _ = self.market_cmd.send(Cmd::Subscribe(vec![t.clone()]));
+                }
+            }
         }
     }
 
@@ -620,7 +638,7 @@ impl Bot {
         line: &mut Value,
         lat: &mut Value,
     ) {
-        self.learn_kickoff(&bk.market).await;
+        self.learn_market(&bk.market).await;
         let my_avg = self.my_avg(&f.token);
         let target = if f.buy { price } else { strategy::exit_price(price, self.his_avg(&f.token), my_avg, bk.tick) };
         // mes ordres à ses autres prix restent posés (il tient souvent plusieurs niveaux) : les annuler me faisait perdre
@@ -654,9 +672,18 @@ impl Bot {
             let usd = self.strat.buy.add_usd(&ctx);
             line["p_cum"] = json!(cum / self.his_value);
             if usd <= 0.0 {
-                let below = sizing::stake_frac(cum / self.his_value, &self.cfg.tiers) <= 0.0;
+                let s = &self.cfg.strategy;
+                let why = if s.buy != "proportional" {
+                    if sizing::stake_frac(cum / self.his_value, &self.cfg.tiers) <= 0.0 { "sous le premier palier" } else { "engagement atteint" }
+                } else if ctx.committed_usd + 1e-9 >= s.max_frac * ctx.my_value {
+                    "plafond du token atteint"
+                } else if ctx.my_cash < ctx.min_usd {
+                    "cash insuffisant pour le minimum"
+                } else {
+                    "complément sous le minimum d'ordre"
+                };
                 line["decision"] = json!("skip");
-                line["reason"] = json!(if below { "sous le premier palier" } else { "engagement atteint" });
+                line["reason"] = json!(why);
                 return;
             }
             self.his_kept.entry(f.token.clone()).or_insert(1.0);
@@ -787,8 +814,9 @@ impl Bot {
             }
         }
         line["order"] = json!({ "id": id, "price": price, "size": shares, "ahead": r.ahead, "filled_now": r.filled, "live_id": r.live_id });
+        let kickoff = self.kickoff(token).filter(|k| *k > at);
         self.log(json!({ "t": "order", "ev": "post", "id": id, "token": token, "side": side, "price": price,
-            "size": shares, "ahead": r.ahead, "filled": r.filled, "live_id": r.live_id }));
+            "size": shares, "ahead": r.ahead, "filled": r.filled, "live_id": r.live_id, "kickoff": kickoff }));
         if r.left() > 1e-9 {
             self.rests.push(r);
         } else {
@@ -1208,11 +1236,11 @@ fn run(path: &str) {
             start_ms, live, journal, clock: clock.clone(), strat: strategy::build(&cfg.strategy),
             rests: vec![], next_id: 1, his_orders: HashMap::new(), cancelled: HashMap::new(), his_first: HashMap::new(), his_cum: HashMap::new(),
             his_kept: HashMap::new(), his_cost, bought: HashMap::new(), sold: HashMap::new(), applied: HashSet::new(), side_checks: 0,
-            ws_side: HashMap::new(), game_start: HashMap::new(), cfg,
+            ws_side: HashMap::new(), complement: HashMap::new(), game_start: HashMap::new(), cfg,
         };
         bot.minute().await;
         let line = json!({ "t": "start", "mode": bot.cfg.mode, "wallet": bot.cfg.wallet, "tiers": bot.cfg.tiers, "cash": real_cash, "his_value": bot.his_value, "his_positions": bot.his_pos.len(),
-            "strategy": { "exec": bot.cfg.strategy.exec, "buy": bot.cfg.strategy.buy, "sell": bot.cfg.strategy.sell, "cancel_after_min": bot.cfg.strategy.cancel_after_min } });
+            "strategy": { "exec": bot.cfg.strategy.exec, "buy": bot.cfg.strategy.buy, "sell": bot.cfg.strategy.sell, "cancel_after_min": bot.cfg.strategy.cancel_after_min, "leverage": bot.cfg.strategy.leverage, "max_frac": bot.cfg.strategy.max_frac } });
         bot.log(line);
         let mut poll = tokio::time::interval(Duration::from_secs(5));
         let mut minute = tokio::time::interval(Duration::from_secs(60));
@@ -1236,9 +1264,15 @@ fn run(path: &str) {
                         let taker_buy = side == engine_core::event::Side::Bid;
                         // le contrôle du sens se fait à l'arrivée de son log (on_fill) : le websocket arrive ~1,4 s avant
                         if bot.ws_side.len() > 100_000 { bot.ws_side.clear(); }
-                        bot.ws_side.insert(id.clone(), taker_buy);
+                        bot.ws_side.insert(format!("{id}:{asset}"), taker_buy);
                         if bot.strat.maker && bot.live.is_none() {
-                            bot.on_public_trade(&asset, price as f64 / 1e6, size as f64 / 1e6, taker_buy, &id);
+                            let (p, q) = (price as f64 / 1e6, size as f64 / 1e6);
+                            bot.on_public_trade(&asset, p, q, taker_buy, &id);
+                            // acheter un token à p, c'est vendre l'opposé à 1 − p (et inversement) : ce trade atteint
+                            // aussi mes ordres posés sur l'opposé
+                            if let Some(c) = bot.complement.get(&asset).cloned() {
+                                bot.on_public_trade(&c, 1.0 - p, q, !taker_buy, &id);
+                            }
                         }
                     },
                     Some(Out::Health { source, health, .. }) => bot.log(json!({ "t": "feed", "source": if source == 0 { "chain" } else { "market" }, "health": format!("{health:?}") })),
