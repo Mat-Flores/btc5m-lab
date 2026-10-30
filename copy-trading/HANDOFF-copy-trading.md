@@ -16,7 +16,7 @@
 - Run de test maker `~/ct-maker` toujours en cours sur dublin-dry-run (lancé 2026-10-29 17:11 UTC) ; service paper principal NON relancé (consigne).
 
 **Reste à faire**
-0. Lire les journaux en cours (service + `~/ct-maker`) : bugs 3-6 de l'ANALYSE (annulation au coup d'envoi, sens preneur, dédoublonnage par tx, « déplacé ») ; puis corriger le bug 3 (gameStartTime Gamma) avant tout run sport.
+0. Journaux lus et bugs 1-9 et 11 corrigés (ANALYSE §5-6, 32 tests verts, non commité, non déployé). Le maker +11,63 $ du run `~/ct-maker` est fictif (fills après le coup d'envoi).
 1. Basculer le service sur la stratégie maker = redéploiement (nouveau run) : seulement sur accord ; puis arrêter `~/ct-maker` (`pkill -f maker.json`).
 2. Lire dans `~/ct-maker/journal.jsonl` les `check` `trade_side` (sens du preneur) et les `order fill`.
 3. Live maker non vérifié sur ordre réel (GTC, annulation, `size_matched`) : premier test réel uniquement avec accord.
@@ -38,4 +38,4 @@
 - Tests : WSL `CARGO_TARGET_DIR=$HOME/ct-target cargo test --release` dans copy-trading/ ; `node --test copy-trading/ui/model.test.mjs`.
 - UI : `python copy-trading/ui/serve.py` (service) ou `--journal /home/ubuntu/ct-maker/journal.jsonl --no-sudo --port 8767` (test), puis http://127.0.0.1:8765/.
 
-**Prochaine action** : obtenir l'accès en lecture aux journaux (refusé le 30/10 : lecture de deploy/.env), les analyser contre ANALYSE-2026-10-30.md §5, puis demander l'accord pour commit et redéploiement en `proportional`. Ancienne action : lire `~/ct-maker/journal.jsonl` sur dublin-dry-run (lecture seule) : `check` `trade_side` et `order fill` ; en faire le bilan, puis demander l'accord pour basculer le service sur maker.
+**Prochaine action** : demander l'accord pour commiter (`git commit -- copy-trading actu-bot`) puis pour redéployer le service paper (1 000 $, maker, proportional) et arrêter `~/ct-maker` ; ensuite vérifier dans le journal les lignes `trade_side`, les annulations « coup d'envoi » et `exit_price`. (Les journaux se lisent par `source deploy/lib.sh; load_env; rsh "gzip -c $R_JOURNAL"`.) Ancienne action : lire `~/ct-maker/journal.jsonl` sur dublin-dry-run (lecture seule) : `check` `trade_side` et `order fill` ; en faire le bilan, puis demander l'accord pour basculer le service sur maker.

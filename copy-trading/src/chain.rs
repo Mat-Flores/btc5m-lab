@@ -3,6 +3,8 @@
 //! Disposition des données vérifiée sur 6 logs réels du wallet rapprochés de data-api /activity (2026-10-28) :
 //! topics [sig, orderHash, maker, taker], data [side (0 achat), tokenId, montant maker, montant taker, frais…].
 //! Seuls les logs où le wallet est `maker` sont lus : ceux où il est `taker` répètent ses fills côté contrepartie.
+//! Son ordre preneur a l'échange lui-même en `taker` (topic 3) : c'est ainsi qu'on sait s'il était passif
+//! `[non vérifié sur log réel preneur : contrôlé à chaque run par les lignes check trade_side]`.
 use engine_core::clock::Stamp;
 use engine_core::event::{BookKind, Caps, Event, SourceId};
 use engine_core::feed::{Adapter, DecodeError};
@@ -73,6 +75,8 @@ pub struct Fill {
     pub buy: bool,
     pub usd: f64,
     pub shares: f64,
+    /// Son ordre était posé (rempli par un preneur) ; faux : c'est lui qui a pris le carnet.
+    pub passive: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -128,6 +132,8 @@ pub fn read(text: &str) -> Frame {
         let buy = side == 0.0;
         // achat : il donne des USDC (maker) contre des parts (taker) ; vente : l'inverse
         let (usd, shares) = if buy { (a, b) } else { (b, a) };
+        let taker = r["topics"][3].as_str().unwrap_or("").to_lowercase();
+        let passive = !EXCHANGES.iter().any(|e| taker.ends_with(&e[2..]));
         return match (r["transactionHash"].as_str(), hex_u64(&r["logIndex"])) {
             (Some(tx), Some(log_index)) => Frame::Fill(Fill {
                 tx: tx.to_lowercase(),
@@ -136,6 +142,7 @@ pub fn read(text: &str) -> Frame {
                 buy,
                 usd,
                 shares,
+                passive,
             }),
             _ => Frame::Other,
         };
@@ -175,7 +182,8 @@ mod tests {
                 token: TOKEN.into(),
                 buy: true,
                 usd: 100.0,
-                shares: 200.0
+                shares: 200.0,
+                passive: true
             })
         );
     }
@@ -187,6 +195,13 @@ mod tests {
             panic!()
         };
         assert_eq!((f.buy, f.usd, f.shares), (false, 15.0, 30.0));
+    }
+
+    #[test]
+    fn his_taker_order_has_the_exchange_as_taker() {
+        let t = log(0, 1, 2).replace("0x0000000000000000000000002ed88860", "0x000000000000000000000000e111180000d2663c0091e4f400237545b87b996b");
+        let Frame::Fill(f) = read(&t) else { panic!() };
+        assert!(!f.passive);
     }
 
     #[test]

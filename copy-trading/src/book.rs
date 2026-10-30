@@ -14,6 +14,8 @@ pub struct Book {
     pub neg_risk: bool,
     /// Horodatage du carnet donné par le CLOB (ms).
     pub ts_ms: u64,
+    /// Dernier prix échangé.
+    pub last: Option<f64>,
 }
 
 fn num(v: &Value) -> Option<f64> {
@@ -55,7 +57,21 @@ pub fn parse(body: &[u8]) -> Result<Book, String> {
             .as_str()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0),
+        last: num(&v["last_trade_price"]),
     })
+}
+
+impl Book {
+    /// Prix de valorisation : le milieu si l'écart est serré (≤ 0,10), sinon le dernier prix échangé ramené dans
+    /// [bid, ask] (le milieu d'un carnet 0,01 / 0,99 ne dit rien). Un côté vide : pas de prix.
+    pub fn mark(&self) -> Option<f64> {
+        let (b, a) = (self.bids.first()?.0, self.asks.first()?.0);
+        Some(if a - b <= 0.10 + 1e-9 {
+            (a + b) / 2.0
+        } else {
+            self.last.map_or((a + b) / 2.0, |l| l.clamp(b, a))
+        })
+    }
 }
 
 fn ticks(x: f64, tick: f64) -> f64 {
@@ -115,6 +131,11 @@ mod tests {
             (0.01, 5.0, false, 1793240248866, "0x2789")
         );
         assert!(parse(b"{}").is_err());
+        assert_eq!(b.mark(), Some(0.49));
+        let wide = Book { bids: vec![(0.01, 1.0)], asks: vec![(0.99, 1.0)], ..b.clone() };
+        assert_eq!(wide.mark(), Some(0.49), "écart large : dernier prix");
+        assert_eq!(Book { last: Some(0.999), ..wide.clone() }.mark(), Some(0.99));
+        assert_eq!(Book { asks: vec![], ..wide }.mark(), None);
     }
 
     #[test]

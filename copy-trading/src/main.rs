@@ -343,6 +343,23 @@ struct Bot {
     /// Trades publics déjà appliqués à mes ordres posés (paper), par hash de transaction.
     applied: HashSet<String>,
     side_checks: u32,
+    /// Sens du preneur de chaque trade public vu sur le websocket market (il arrive avant le log de la chaîne).
+    ws_side: HashMap<String, bool>,
+    /// Coup d'envoi par marché (`game_start_time` du CLOB ; None : pas un match). Polymarket annule alors les ordres posés.
+    game_start: HashMap<String, Option<u64>>,
+}
+
+/// `2026-10-30T00:15:00Z` (ou `2026-10-30 00:15:00+00`), toujours en UTC sur Polymarket → ms.
+fn utc_ms(t: &str) -> Option<u64> {
+    let n = |a: usize, b: usize| t.get(a..b)?.parse::<i64>().ok();
+    let (y, mo, d, h, mi, s) = (n(0, 4)?, n(5, 7)?, n(8, 10)?, n(11, 13)?, n(14, 16)?, n(17, 19)?);
+    // jours depuis 1970 (algorithme civil de H. Hinnant)
+    let y = if mo <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (mo + if mo > 2 { -3 } else { 9 }) + 2) / 5 + d - 1;
+    let days = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
+    u64::try_from(((days * 24 + h) * 60 + mi) * 60 + s).ok().map(|x| x * 1000)
 }
 
 fn now_ms(c: &Clock) -> u64 {
@@ -407,8 +424,17 @@ impl Bot {
         };
         line["book_ts"] = json!(bk.ts_ms);
         self.market_of.insert(f.token.clone(), bk.market.clone());
-        if let (Some(b), Some(a)) = (bk.bids.first(), bk.asks.first()) {
-            self.marks.insert(f.token.clone(), (b.0 + a.0) / 2.0);
+        if let Some(m) = bk.mark() {
+            self.marks.insert(f.token.clone(), m);
+        }
+        line["passive"] = json!(f.passive);
+        // contrôle du sens : le trade public de son fill (websocket, arrivé avant la chaîne) a un preneur du sens opposé
+        // au sien s'il était posé, du même sens s'il a pris le carnet
+        if let Some(taker_buy) = self.ws_side.get(&f.tx).copied() {
+            if src == "chain" && self.side_checks < 50 {
+                self.side_checks += 1;
+                self.log(json!({ "t": "check", "kind": "trade_side", "tx": f.tx, "passive": f.passive, "ok": (taker_buy != f.buy) == f.passive }));
+            }
         }
         let skip = |line: &mut Value, why: &str| {
             line["decision"] = json!("skip");
@@ -424,8 +450,9 @@ impl Bot {
             );
         } else if self.strat.maker {
             if self.live.is_none() {
-                // son fill est aussi un trade public : il sert d'abord mes ordres déjà posés
-                self.on_public_trade(&f.token, price, f.shares, !f.buy, &f.tx);
+                // son fill est aussi un trade public : il sert d'abord mes ordres déjà posés ; le preneur est lui s'il
+                // a pris le carnet, sa contrepartie sinon
+                self.on_public_trade(&f.token, price, f.shares, f.buy != f.passive, &f.tx);
             }
             self.maker(&f, his_before, his_price, price, &bk, &mut line, &mut lat)
                 .await;
@@ -469,7 +496,7 @@ impl Bot {
                             &f.token, true, usd, limit, bk.tick, &bk, &mut lat, &mut line,
                         )
                         .await;
-                    self.real.buy(&f.token, sh, cost);
+                    self.book_fill(&f.token, true, sh, cost);
                 }
             }
         } else {
@@ -493,9 +520,16 @@ impl Bot {
                     self.dem.sell(&f.token, d, d * bid);
                     line["asked"] = json!(bid);
                 }
+                let my_avg = self.my_avg(&f.token);
+                let his_avg = self.his_avg(&f.token);
                 match bk.bids.first() {
                     None => line["reason"] = json!("aucun bid"),
                     Some(_) if mine < bk.min_size => line["reason"] = json!("réel sous le minimum"),
+                    // il sort en gain mais le bid me ferait sortir en perte : un FAK ne peut pas attendre mon point mort,
+                    // je garde la position (résolution ou ventes suivantes)
+                    Some(&(bid, _)) if strategy::exit_price(bid, his_avg, my_avg, bk.tick) > bid => {
+                        line["reason"] = json!("sortie protégée : le bid est sous mon prix moyen")
+                    }
                     Some(&(bid, _)) => {
                         let limit = book::sell_limit(bid, self.cfg.max_slippage, bk.tick);
                         line["limit"] = json!(limit);
@@ -504,7 +538,7 @@ impl Bot {
                                 &f.token, false, mine, limit, bk.tick, &bk, &mut lat, &mut line,
                             )
                             .await;
-                        self.real.sell(&f.token, sh, got);
+                        self.book_fill(&f.token, false, sh, got);
                     }
                 }
             }
@@ -527,6 +561,40 @@ impl Bot {
             self.log(json!({ "t": "stat", "kind": "annulation à tort", "token": f.token, "side": if f.buy { "BUY" } else { "SELL" },
                 "price": price, "cancelled_at": cancelled_at, "idle_before_cancel_ms": cancelled_at - last_ms, "revived_after_ms": at - cancelled_at }));
         }
+    }
+
+    /// Mon prix moyen d'achat (compte réel), 0 si rien.
+    fn my_avg(&self, token: &str) -> f64 {
+        let (cost, bought) = self.bought.get(token).copied().unwrap_or((0.0, 0.0));
+        if bought > 0.0 {
+            cost / bought
+        } else {
+            0.0
+        }
+    }
+
+    /// Son prix moyen : connu si ses positions du démarrage (`/positions`) plus ses achats du run couvrent sa position.
+    fn his_avg(&self, token: &str) -> Option<f64> {
+        let held = self.his_pos.get(token).copied().unwrap_or(0.0);
+        self.his_cost
+            .get(token)
+            .filter(|c| c.1 > 0.0 && c.1 + 1e-6 >= 0.99 * held)
+            .map(|c| c.0 / c.1)
+    }
+
+    /// Coup d'envoi du marché, lu une fois par marché sur le CLOB.
+    async fn learn_kickoff(&mut self, market: &str) {
+        if self.game_start.contains_key(market) {
+            return;
+        }
+        if let Ok(v) = get_json(&format!("{CLOB}/markets/{market}")).await {
+            self.game_start
+                .insert(market.into(), v["game_start_time"].as_str().and_then(utc_ms));
+        }
+    }
+
+    fn kickoff(&self, token: &str) -> Option<u64> {
+        self.game_start.get(self.market_of.get(token)?).copied().flatten()
     }
 
     fn committed_usd(&self, token: &str) -> f64 {
@@ -552,24 +620,11 @@ impl Bot {
         line: &mut Value,
         lat: &mut Value,
     ) {
-        let (cost, bought) = self.bought.get(&f.token).copied().unwrap_or((0.0, 0.0));
-        let my_avg = if bought > 0.0 { cost / bought } else { 0.0 };
-        // shortcut: son prix moyen n'est connu que si le run a vu tous ses achats du token ; sinon on suit son prix
-        let his_avg = self
-            .his_cost
-            .get(&f.token)
-            .filter(|c| c.1 > 0.0 && c.1 + 1e-6 >= 0.99 * self.his_pos.get(&f.token).copied().unwrap_or(0.0))
-            .map(|c| c.0 / c.1);
-        let target = if f.buy { price } else { strategy::exit_price(price, his_avg, my_avg, bk.tick) };
-        let moved: Vec<u64> = self
-            .rests
-            .iter()
-            .filter(|r| r.token == f.token && r.buy == f.buy && (r.price - target).abs() > 1e-9)
-            .map(|r| r.id)
-            .collect();
-        for id in moved {
-            self.cancel(id, "déplacé").await;
-        }
+        self.learn_kickoff(&bk.market).await;
+        let my_avg = self.my_avg(&f.token);
+        let target = if f.buy { price } else { strategy::exit_price(price, self.his_avg(&f.token), my_avg, bk.tick) };
+        // mes ordres à ses autres prix restent posés (il tient souvent plusieurs niveaux) : les annuler me faisait perdre
+        // ma place dans la file ; ils expirent avec `cancel_after_min` et le budget du token les compte déjà
         let at = now_ms(&self.clock);
         if f.buy {
             if self.his_value <= 0.0 {
@@ -757,11 +812,30 @@ impl Bot {
         let Some(i) = self.rests.iter().position(|r| r.id == id) else {
             return;
         };
-        let r = self.rests.remove(i);
-        if let (Some(l), Some(live_id)) = (self.live.as_mut(), r.live_id.as_ref()) {
+        let mut r = self.rests.remove(i);
+        if let (Some(l), Some(live_id)) = (self.live.as_mut(), r.live_id.clone()) {
             let ts = now_ms(&self.clock) / 1000;
-            if let Ok(req) = exec::cancel_request(HOST, &l.armed.signer, &l.armed.creds, live_id, ts) {
+            if let Ok(req) = exec::cancel_request(HOST, &l.armed.signer, &l.armed.creds, &live_id, ts) {
                 let _ = l.clob.get(&req, T).await;
+            }
+            // un remplissage entre le dernier relevé et l'annulation ne doit pas sortir des comptes
+            // `[non vérifié sur ordre réel]`
+            let matched = match exec::query_request(HOST, &l.armed.signer, &l.armed.creds, &live_id, ts) {
+                Ok(req) => match l.clob.get(&req, T).await {
+                    Ok(resp) => serde_json::from_slice::<Value>(&resp.body).unwrap_or_default()["size_matched"]
+                        .as_str()
+                        .and_then(|x| x.parse::<f64>().ok()),
+                    Err(_) => None,
+                },
+                Err(_) => None,
+            };
+            let q = matched.map_or(0.0, |m| m - r.filled);
+            if q > 1e-9 {
+                r.filled += q;
+                r.usd += q * r.price;
+                self.book_fill(&r.token, r.buy, q, q * r.price);
+                self.log(json!({ "t": "order", "ev": "fill", "id": id, "token": r.token, "side": if r.buy { "BUY" } else { "SELL" },
+                    "price": r.price, "shares": q, "left": r.left(), "status": "avant annulation" }));
             }
         }
         self.log(json!({ "t": "order", "ev": "cancel", "id": id, "reason": why, "filled": r.filled, "left": r.left() }));
@@ -769,14 +843,24 @@ impl Bot {
 
     /// Un trade public (paper) : il remplit ceux de mes ordres posés sur ce token qu'il atteint.
     fn on_public_trade(&mut self, token: &str, price: f64, size: f64, taker_buy: bool, tx: &str) {
-        if !tx.is_empty() && !self.applied.insert(tx.to_string()) {
+        // une tx peut porter plusieurs trades (un preneur contre plusieurs niveaux) : la clé est tx + token + prix ; le
+        // même trade vu par le websocket puis par la chaîne n'est compté qu'une fois
+        let key = format!("{tx}:{token}:{}", (price * 1e6).round() as i64);
+        if !tx.is_empty() && !self.applied.insert(key) {
             return;
         }
         if self.applied.len() > 200_000 {
             self.applied.clear();
         }
+        // au coup d'envoi, Polymarket annule les ordres posés avant : ils ne se remplissent plus (expire() les retire)
+        let ko = self.kickoff(token);
+        let now = now_ms(&self.clock);
         let mut fills = vec![];
-        for r in self.rests.iter_mut().filter(|r| r.token == token) {
+        for r in self
+            .rests
+            .iter_mut()
+            .filter(|r| r.token == token && !ko.is_some_and(|k| now >= k && r.posted_ms < k))
+        {
             let q = r.on_trade(price, size, taker_buy);
             if q > 0.0 {
                 fills.push((r.id, r.buy, q, q * r.price, r.left()));
@@ -852,6 +936,15 @@ impl Bot {
         for (id, k, last) in stale {
             self.cancelled.insert(k, (now, last));
             self.cancel(id, "inactif").await;
+        }
+        let kicked: Vec<u64> = self
+            .rests
+            .iter()
+            .filter(|r| self.kickoff(&r.token).is_some_and(|k| now >= k && r.posted_ms < k))
+            .map(|r| r.id)
+            .collect();
+        for id in kicked {
+            self.cancel(id, "coup d'envoi").await;
         }
     }
 
@@ -956,6 +1049,9 @@ impl Bot {
                             buy,
                             usd,
                             shares: size,
+                            // data-api ne dit pas qui a pris le carnet : il pose presque toujours (≈ 500 fills preneur
+                            // en 9 mois sur /trades?takerOnly, 2026-10-30)
+                            passive: true,
                         },
                         "data-api",
                         now,
@@ -982,8 +1078,8 @@ impl Bot {
         let mut done = HashSet::new();
         for tok in held {
             if let Ok(b) = self.book(&tok).await {
-                if let (Some(x), Some(y)) = (b.bids.first(), b.asks.first()) {
-                    self.marks.insert(tok.clone(), (x.0 + y.0) / 2.0);
+                if let Some(m) = b.mark() {
+                    self.marks.insert(tok.clone(), m);
                 }
             }
             let Some(m) = self.market_of.get(&tok).cloned() else {
@@ -1087,6 +1183,18 @@ fn run(path: &str) {
         };
         let his_pos: HashMap<String, f64> = adapter_polymarket::account::holdings(&cfg.wallet, T, 40).await.unwrap_or_default()
             .into_iter().map(|h| (h.token, h.shares as f64 / 1e6)).collect();
+        // son prix moyen sur les positions déjà ouvertes, pour savoir s'il sort en gain (data-api, 500 lignes par page)
+        let mut his_cost: HashMap<String, (f64, f64)> = HashMap::new();
+        for page in 0..20 {
+            let Ok(v) = get_json(&format!("{DATA}/positions?user={}&limit=500&offset={}&sizeThreshold=0", cfg.wallet, page * 500)).await else { break };
+            let Some(rows) = v.as_array() else { break };
+            for r in rows {
+                if let (Some(a), Some(s), Some(p)) = (r["asset"].as_str(), r["size"].as_f64(), r["avgPrice"].as_f64()) {
+                    his_cost.insert(a.to_string(), (s * p, s));
+                }
+            }
+            if rows.len() < 500 { break; }
+        }
         let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel();
         let (chain_cmd, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
         tokio::spawn(feed::run_with(Box::new(chain::Logs { url: cfg.rpc_ws.clone(), wallet: cfg.wallet.clone() }), 0, 0, vec![], clock.clone(), cmd_rx, out_tx.clone(), true));
@@ -1099,7 +1207,8 @@ fn run(path: &str) {
             marks: BTreeMap::new(), market_of: HashMap::new(), matched: HashMap::new(), subscribed, market_cmd, chain_cmd, last_resync_ms: 0, recovered: HashSet::new(), seen_logs: HashSet::new(), by_tx: HashMap::new(), checked: HashSet::new(), entered: HashSet::new(),
             start_ms, live, journal, clock: clock.clone(), strat: strategy::build(&cfg.strategy),
             rests: vec![], next_id: 1, his_orders: HashMap::new(), cancelled: HashMap::new(), his_first: HashMap::new(), his_cum: HashMap::new(),
-            his_kept: HashMap::new(), his_cost: HashMap::new(), bought: HashMap::new(), sold: HashMap::new(), applied: HashSet::new(), side_checks: 0, cfg,
+            his_kept: HashMap::new(), his_cost, bought: HashMap::new(), sold: HashMap::new(), applied: HashSet::new(), side_checks: 0,
+            ws_side: HashMap::new(), game_start: HashMap::new(), cfg,
         };
         bot.minute().await;
         let line = json!({ "t": "start", "mode": bot.cfg.mode, "wallet": bot.cfg.wallet, "tiers": bot.cfg.tiers, "cash": real_cash, "his_value": bot.his_value, "his_positions": bot.his_pos.len(),
@@ -1125,13 +1234,9 @@ fn run(path: &str) {
                             bot.matched.entry(id.clone()).or_insert(ms);
                         }
                         let taker_buy = side == engine_core::event::Side::Bid;
-                        // son achat posé rempli = un preneur vendeur : on vérifie que `side` est bien le sens du preneur
-                        if let Some((_, his_buy, _)) = bot.by_tx.get(&id).cloned() {
-                            if bot.side_checks < 50 {
-                                bot.side_checks += 1;
-                                bot.log(json!({ "t": "check", "kind": "trade_side", "tx": id, "ok": taker_buy != his_buy }));
-                            }
-                        }
+                        // le contrôle du sens se fait à l'arrivée de son log (on_fill) : le websocket arrive ~1,4 s avant
+                        if bot.ws_side.len() > 100_000 { bot.ws_side.clear(); }
+                        bot.ws_side.insert(id.clone(), taker_buy);
                         if bot.strat.maker && bot.live.is_none() {
                             bot.on_public_trade(&asset, price as f64 / 1e6, size as f64 / 1e6, taker_buy, &id);
                         }
@@ -1211,6 +1316,16 @@ mod tests {
             order_request(&s, &c, token, false, 10.0, 0.555, 0.01, 1, 0, "FAK").is_err(),
             "prix hors grille refusé"
         );
+    }
+
+    #[test]
+    fn kickoff_times_parse_in_both_polymarket_formats() {
+        // CLOB et Gamma, vu sur Panthers-Packers (coup d'envoi 2026-10-30 00:15 UTC)
+        assert_eq!(utc_ms("2026-10-30T00:15:00Z"), Some(1_793_319_300_000));
+        assert_eq!(utc_ms("2026-10-30 00:15:00+00"), Some(1_793_319_300_000));
+        assert_eq!(utc_ms("1970-01-01T00:00:01Z"), Some(1_000));
+        assert_eq!(utc_ms("2024-02-29T12:00:00Z"), Some(1_709_208_000_000));
+        assert_eq!(utc_ms("demain"), None);
     }
 
     #[test]
