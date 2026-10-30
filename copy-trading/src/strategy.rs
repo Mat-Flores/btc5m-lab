@@ -18,6 +18,17 @@ pub struct StrategyCfg {
     /// Annulation de mon ordre posé quand il n'a plus rempli à ce prix depuis ce délai (min).
     #[serde(default = "ttl")]
     pub cancel_after_min: u64,
+    /// `proportional` : multiple de sa part engagée sur le token, et plafond par token (part de ma valeur).
+    #[serde(default = "one")]
+    pub leverage: f64,
+    #[serde(default = "max_frac")]
+    pub max_frac: f64,
+}
+fn one() -> f64 {
+    1.0
+}
+fn max_frac() -> f64 {
+    0.15
 }
 fn maker() -> String {
     "maker".into()
@@ -38,6 +49,8 @@ impl Default for StrategyCfg {
             buy: cumulative(),
             sell: lots(),
             cancel_after_min: ttl(),
+            leverage: one(),
+            max_frac: max_frac(),
         }
     }
 }
@@ -100,6 +113,45 @@ impl BuySizer for Cumulative {
         } else {
             add
         }
+    }
+}
+
+/// Mon engagement sur le token = `leverage` × sa part engagée (son cumul / sa valeur) × ma valeur, plafonné à `max_frac`
+/// de ma valeur. Sans relèvement au minimum : ses petits achats s'accumulent jusqu'à faire un ordre, donc plusieurs
+/// entrées par token, et ses petites positions (perdantes sur 30 j, rejeu du 2026-10-30) restent ignorées.
+pub struct Proportional {
+    pub leverage: f64,
+    pub max_frac: f64,
+}
+
+impl BuySizer for Proportional {
+    fn add_usd(&self, c: &BuyCtx) -> f64 {
+        if c.his_value <= 0.0 {
+            return 0.0;
+        }
+        let target = (self.leverage * c.his_cum_usd / c.his_value * c.my_value)
+            .min(self.max_frac * c.my_value);
+        let add = ((target - c.committed_usd).min(c.my_cash).min(c.max_usd) * 100.0 + 1e-9)
+            .floor()
+            / 100.0;
+        if add + 1e-9 < c.min_usd {
+            0.0
+        } else {
+            add
+        }
+    }
+}
+
+/// Prix de ma vente : le sien, sauf s'il sort en gain (son prix ≥ son prix moyen) à un prix qui me ferait sortir en
+/// perte : je pose alors à mon point mort, au tick supérieur. S'il sort en perte, ou si son prix moyen est inconnu, je
+/// le suis.
+pub fn exit_price(his_price: f64, his_avg: Option<f64>, my_avg: f64, tick: f64) -> f64 {
+    match his_avg {
+        Some(h) if his_price >= h && his_price < my_avg => {
+            let be = ((my_avg / tick - 1e-9).ceil() * tick * 1e6).round() / 1e6;
+            be.min(1.0 - tick)
+        }
+        _ => his_price,
     }
 }
 
@@ -183,7 +235,11 @@ pub fn build(c: &StrategyCfg) -> Strategy {
         buy: match c.buy.as_str() {
             "cumulative" => Box::new(Cumulative),
             "first_fill" => Box::new(FirstFill),
-            x => panic!("config : strategy.buy inconnu : {x} (cumulative | first_fill)"),
+            "proportional" => Box::new(Proportional {
+                leverage: c.leverage,
+                max_frac: c.max_frac,
+            }),
+            x => panic!("config : strategy.buy inconnu : {x} (cumulative | first_fill | proportional)"),
         },
         sell: match c.sell.as_str() {
             "lots" => Box::new(Lots),
@@ -222,6 +278,41 @@ mod tests {
         assert_eq!(Cumulative.add_usd(&buy(60.0, 40.0, 0.0)), 0.0, "poussière");
         assert_eq!(FirstFill.add_usd(&buy(60.0, 60.0, 0.0)), 3.0);
         assert_eq!(FirstFill.add_usd(&buy(60.0, 6_000.0, 3.0)), 0.0);
+    }
+
+    #[test]
+    fn proportional_accumulates_his_small_buys_and_is_capped() {
+        let p = Proportional {
+            leverage: 1.0,
+            max_frac: 0.15,
+        };
+        let c = |cum: f64, committed: f64| BuyCtx {
+            his_cum_usd: cum,
+            my_value: 1000.0,
+            my_cash: 800.0,
+            min_usd: 2.5,
+            max_usd: 150.0,
+            ..buy(0.0, cum, committed)
+        };
+        // 5 M$ chez lui, 1 000 $ chez moi : 10 k$ → 2 $ (< minimum, on attend), 15 k$ → 3 $, puis le complément
+        assert_eq!(p.add_usd(&c(10_000.0, 0.0)), 0.0);
+        assert_eq!(p.add_usd(&c(15_000.0, 0.0)), 3.0);
+        assert_eq!(p.add_usd(&c(50_000.0, 3.0)), 7.0);
+        // 10 % de son portefeuille → 100 $ ; 50 % → plafond 15 % de ma valeur
+        assert_eq!(p.add_usd(&c(500_000.0, 0.0)), 100.0);
+        assert_eq!(p.add_usd(&c(2_500_000.0, 100.0)), 50.0);
+    }
+
+    #[test]
+    fn exit_waits_for_my_break_even_only_when_he_exits_in_gain() {
+        // lui : entré à 0,50, sort à 0,52 ; moi entré à 0,537 → je pose à 0,54
+        assert_eq!(exit_price(0.52, Some(0.50), 0.537, 0.01), 0.54);
+        // sa sortie me laisse en gain : son prix
+        assert_eq!(exit_price(0.52, Some(0.50), 0.51, 0.01), 0.52);
+        // il coupe en perte, ou son prix moyen est inconnu : je le suis
+        assert_eq!(exit_price(0.40, Some(0.50), 0.537, 0.01), 0.40);
+        assert_eq!(exit_price(0.52, None, 0.537, 0.01), 0.52);
+        assert_eq!(exit_price(0.98, Some(0.90), 0.995, 0.01), 0.99);
     }
 
     fn sell(frac: f64, price: f64, held: f64, sold: f64, listed: f64) -> SellCtx {

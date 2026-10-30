@@ -133,9 +133,10 @@ Puis ouvrir http://127.0.0.1:8765/ (ou le port choisi). Python 3 seul, aucune d�
 | Clé | Valeurs | Défaut |
 | --- | --- | --- |
 | `exec` | `maker` : je pose un ordre limite à son prix · `taker` : je prends le carnet (FAK) | `maker` |
-| `buy` | `cumulative` : mon engagement suit son cumul sur le token (barème) · `first_fill` : une entrée, sur son 1er remplissage | `cumulative` |
-| `sell` | `lots` : sa fraction vendue, par lots vendables, au moins un lot en gain · `all` : toute ma position à son prix | `lots` |
-| `cancel_after_min` | annulation de mon ordre posé s'il n'a plus rempli à ce prix depuis ce délai | `360` |
+| `buy` | `proportional` : mon engagement sur le token = `leverage` × sa part engagée × ma valeur, plafonné à `max_frac`, ses petits achats s'accumulent jusqu'au minimum d'ordre (plusieurs entrées par token) · `cumulative` : mon engagement suit son cumul sur le token (barème) · `first_fill` : une entrée, sur son 1er remplissage | `cumulative` (`proportional` dans config.example.json) |
+| `leverage`, `max_frac` | multiple de sa part et plafond par token, pour `proportional` | `1.0`, `0.15` |
+| `sell` | `lots` : sa fraction vendue, par lots vendables, au moins un lot en gain · `all` : toute ma position à son prix. En maker, s'il sort en gain à un prix qui me ferait sortir en perte, ma vente est posée à mon point mort (champ `exit_price` du journal) ; s'il coupe en perte, je le suis | `lots` |
+| `cancel_after_min` | annulation de mon ordre posé s'il n'a plus rempli à ce prix depuis ce délai ; un ordre posé sur un marché résolu est annulé à la résolution | `360` |
 
 Ses ordres ouverts ne sont pas publics : ils sont déduits de ses remplissages. Une annulation de mon côté démentie par un fill de lui au même prix est tracée (`stat` « annulation à tort »).
 

@@ -335,6 +335,8 @@ struct Bot {
     his_first: HashMap<String, f64>,
     his_cum: HashMap<String, f64>,
     his_kept: HashMap<String, f64>,
+    /// Par token : ses achats vus pendant le run ($, parts), réduits au prorata de ses ventes : son prix moyen.
+    his_cost: HashMap<String, (f64, f64)>,
     /// Par token, compte réel : $ et parts achetés, parts vendues depuis l'entrée.
     bought: HashMap<String, (f64, f64)>,
     sold: HashMap<String, f64>,
@@ -378,6 +380,13 @@ impl Bot {
         let his_before = self.his_pos.get(&f.token).copied().unwrap_or(0.0);
         *self.his_pos.entry(f.token.clone()).or_default() +=
             if f.buy { f.shares } else { -f.shares };
+        let c = self.his_cost.entry(f.token.clone()).or_default();
+        if f.buy {
+            (c.0, c.1) = (c.0 + f.usd, c.1 + f.shares);
+        } else if his_before > 0.0 {
+            let k = (1.0 - f.shares / his_before).max(0.0);
+            (c.0, c.1) = (c.0 * k, c.1 * k);
+        }
         let his_price = if f.shares > 0.0 {
             f.usd / f.shares
         } else {
@@ -543,10 +552,19 @@ impl Bot {
         line: &mut Value,
         lat: &mut Value,
     ) {
+        let (cost, bought) = self.bought.get(&f.token).copied().unwrap_or((0.0, 0.0));
+        let my_avg = if bought > 0.0 { cost / bought } else { 0.0 };
+        // shortcut: son prix moyen n'est connu que si le run a vu tous ses achats du token ; sinon on suit son prix
+        let his_avg = self
+            .his_cost
+            .get(&f.token)
+            .filter(|c| c.1 > 0.0 && c.1 + 1e-6 >= 0.99 * self.his_pos.get(&f.token).copied().unwrap_or(0.0))
+            .map(|c| c.0 / c.1);
+        let target = if f.buy { price } else { strategy::exit_price(price, his_avg, my_avg, bk.tick) };
         let moved: Vec<u64> = self
             .rests
             .iter()
-            .filter(|r| r.token == f.token && r.buy == f.buy && (r.price - price).abs() > 1e-9)
+            .filter(|r| r.token == f.token && r.buy == f.buy && (r.price - target).abs() > 1e-9)
             .map(|r| r.id)
             .collect();
         for id in moved {
@@ -605,11 +623,13 @@ impl Bot {
             line["x"] = json!(frac);
             let held = self.real.shares(&f.token);
             let listed: f64 = self.rests.iter().filter(|r| !r.buy && r.token == f.token).map(|r| r.left()).sum();
-            let (cost, bought) = self.bought.get(&f.token).copied().unwrap_or((0.0, 0.0));
+            if target != price {
+                line["exit_price"] = json!(target);
+            }
             let ctx = strategy::SellCtx {
                 his_sold_frac: 1.0 - kept.unwrap_or(1.0),
-                his_price: price,
-                my_avg_cost: if bought > 0.0 { cost / bought } else { 0.0 },
+                his_price: target,
+                my_avg_cost: my_avg,
                 held,
                 sold: self.sold.get(&f.token).copied().unwrap_or(0.0),
                 listed,
@@ -631,7 +651,7 @@ impl Bot {
                 return;
             }
             line["decision"] = json!("sell");
-            self.post(&f.token, false, price, mine, bk, line, lat, at).await;
+            self.post(&f.token, false, target, mine, bk, line, lat, at).await;
         }
     }
 
@@ -994,6 +1014,11 @@ impl Bot {
                 }
                 self.marks.remove(id);
                 self.log(json!({ "t": "resolution", "market": m, "token": id, "payout": payout }));
+                // un ordre posé sur un marché résolu ne sera plus rempli : il bloquait mon cash jusqu'à l'expiration
+                let dead: Vec<u64> = self.rests.iter().filter(|r| r.token == id).map(|r| r.id).collect();
+                for rid in dead {
+                    self.cancel(rid, "marché résolu").await;
+                }
             }
         }
         let st = |a: &Account, marks: &BTreeMap<String, f64>| {
@@ -1074,7 +1099,7 @@ fn run(path: &str) {
             marks: BTreeMap::new(), market_of: HashMap::new(), matched: HashMap::new(), subscribed, market_cmd, chain_cmd, last_resync_ms: 0, recovered: HashSet::new(), seen_logs: HashSet::new(), by_tx: HashMap::new(), checked: HashSet::new(), entered: HashSet::new(),
             start_ms, live, journal, clock: clock.clone(), strat: strategy::build(&cfg.strategy),
             rests: vec![], next_id: 1, his_orders: HashMap::new(), cancelled: HashMap::new(), his_first: HashMap::new(), his_cum: HashMap::new(),
-            his_kept: HashMap::new(), bought: HashMap::new(), sold: HashMap::new(), applied: HashSet::new(), side_checks: 0, cfg,
+            his_kept: HashMap::new(), his_cost: HashMap::new(), bought: HashMap::new(), sold: HashMap::new(), applied: HashSet::new(), side_checks: 0, cfg,
         };
         bot.minute().await;
         let line = json!({ "t": "start", "mode": bot.cfg.mode, "wallet": bot.cfg.wallet, "tiers": bot.cfg.tiers, "cash": real_cash, "his_value": bot.his_value, "his_positions": bot.his_pos.len(),

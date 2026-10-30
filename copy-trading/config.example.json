@@ -4,10 +4,10 @@
   "wallet_file": "/var/lib/copy-trading/wallet",
   "journal": "/var/lib/copy-trading/journal.jsonl",
   "tiers": [[0.00001, 0.03], [0.001, 0.05], [0.01, 0.10]],
-  "paper_cash_usd": 20.0,
-  "max_order_usd": 20.0,
+  "paper_cash_usd": 1000.0,
+  "max_order_usd": 150.0,
   "max_slippage": 0.10,
   "rpc_ws": "wss://polygon-bor-rpc.publicnode.com",
   "rpc_http": "https://polygon-bor-rpc.publicnode.com",
-  "strategy": {"exec": "maker", "buy": "cumulative", "sell": "lots", "cancel_after_min": 360}
+  "strategy": {"exec": "maker", "buy": "proportional", "sell": "lots", "cancel_after_min": 360, "leverage": 1.0, "max_frac": 0.15}
 }
